@@ -1,0 +1,150 @@
+# Training Configuration
+
+# Data directories
+data_dir: "data/training"
+output_dir: "data/output"
+model_dir: "models/trained"
+test_dir: "data/tests"
+
+# Training parameters
+batch_size: 32
+epochs: 100
+learning_rate: 0.001
+validation_split: 0.2
+early_stopping_patience: 10
+
+# Model parameters
+models:
+  eye_tracking:
+    type: "cnn"
+    layers: [32, 64, 128]
+    dropout: 0.3
+    activation: "relu"
+    optimizer: "adam"
+    loss: "mse"
+  
+  gaze_detection:
+    type: "yolo"
+    version: "v4"
+    input_size: [416, 416]
+    confidence_threshold: 0.5
+    nms_threshold: 0.4
+  
+  blink_analysis:
+    type: "lstm"
+    units: [64, 32]
+    dropout: 0.2
+    recurrent_dropout: 0.2
+    activation: "tanh"
+    optimizer: "adam"
+    loss: "binary_crossentropy"
+  
+  pupil_dilation:
+    type: "regression"
+    layers: [16, 8]
+    dropout: 0.1
+    activation: "relu"
+    optimizer: "adam"
+    loss: "mse"
+  
+  focus_control:
+    type: "reinforcement"
+    state_size: 10
+    action_size: 4
+    hidden_size: 64
+    learning_rate: 0.0001
+    gamma: 0.99
+    epsilon: 0.1
+  
+  microsaccades:
+    type: "generative"
+    latent_dim: 32
+    hidden_size: 64
+    dropout: 0.2
+    activation: "relu"
+    optimizer: "adam"
+    loss: "mse"
+
+# Agent integration
+agent_integration:
+  memory_agent:
+    enabled: true
+    update_interval: 1.0
+    memory_size: 1000
+    batch_size: 32
+  
+  emotion_agent:
+    enabled: true
+    update_interval: 0.1
+    emotion_states: ["neutral", "happy", "sad", "angry", "surprised", "fearful", "disgusted"]
+    intensity_range: [0.0, 1.0]
+  
+  learning_agent:
+    enabled: true
+    update_interval: 1.0
+    learning_rate: 0.001
+    exploration_rate: 0.1
+    discount_factor: 0.99
+  
+  task_agent:
+    enabled: true
+    update_interval: 0.1
+    max_tasks: 10
+    task_priority_levels: 3
+  
+  social_agent:
+    enabled: true
+    update_interval: 0.1
+    interaction_types: ["greeting", "conversation", "cooperation", "conflict"]
+    social_learning_rate: 0.001
+
+# Data augmentation
+augmentation:
+  enabled: true
+  rotation_range: 20
+  width_shift_range: 0.2
+  height_shift_range: 0.2
+  horizontal_flip: true
+  vertical_flip: false
+  zoom_range: 0.2
+  brightness_range: [0.8, 1.2]
+  contrast_range: [0.8, 1.2]
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/training.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
+
+# Monitoring
+monitoring:
+  enabled: true
+  metrics:
+    - "accuracy"
+    - "loss"
+    - "precision"
+    - "recall"
+    - "f1_score"
+  visualization:
+    enabled: true
+    update_interval: 1.0
+    save_interval: 10.0
+    output_dir: "data/visualizations"
+
+# Hardware
+hardware:
+  use_gpu: true
+  gpu_id: 0
+  num_threads: 4
+  memory_limit: 8192  # MB
+
+# Feature flags
+features:
+  use_data_augmentation: true
+  use_early_stopping: true
+  use_model_checkpointing: true
+  use_tensorboard: true
+  use_agent_integration: true
+  use_visualization: true 

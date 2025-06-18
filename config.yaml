@@ -1,0 +1,87 @@
+# Server configuration
+host: "0.0.0.0"
+port: 8000
+reload: true
+
+# Emotion model configuration
+emotion_model:
+  model_path: "models/emotion/emotion_model.pt"
+  version: "1.0.0"
+  input_size: 224
+  labels:
+    - "happy"
+    - "sad"
+    - "angry"
+    - "neutral"
+    - "surprised"
+    - "disgusted"
+    - "fearful"
+
+# Face model configuration
+face_model:
+  model_path: "models/face/face_model.pt"
+  version: "1.0.0"
+  input_size: 224
+  person_ids:
+    - "person_1"
+    - "person_2"
+    - "person_3"
+    - "person_4"
+    - "person_5"
+
+# Language model configuration
+language_model:
+  model_path: "models/language/language_model"
+  version: "1.0.0"
+  max_length: 512
+  entity_threshold: 0.5
+  intents:
+    - "greeting"
+    - "farewell"
+    - "question"
+    - "statement"
+    - "command"
+    - "request"
+    - "confirmation"
+
+# Planning model configuration
+planning_model:
+  model_path: "models/planning/planning_model.pt"
+  version: "1.0.0"
+  state_features:
+    - "position_x"
+    - "position_y"
+    - "velocity_x"
+    - "velocity_y"
+    - "energy"
+    - "health"
+    - "inventory"
+  actions:
+    - "move_forward"
+    - "move_backward"
+    - "move_left"
+    - "move_right"
+    - "jump"
+    - "attack"
+    - "defend"
+    - "use_item"
+    - "pick_up"
+    - "drop"
+
+# Motivation model configuration
+motivation_model:
+  model_path: "models/motivation/motivation_model.pt"
+  version: "1.0.0"
+  state_features:
+    - "position_x"
+    - "position_y"
+    - "velocity_x"
+    - "velocity_y"
+    - "energy"
+    - "health"
+    - "inventory"
+  action_features:
+    - "action_type"
+    - "action_direction"
+    - "action_magnitude"
+    - "action_duration" 

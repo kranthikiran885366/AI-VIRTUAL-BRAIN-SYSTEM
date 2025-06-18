@@ -1,0 +1,52 @@
+{
+    "name": "english_female",
+    "language": "en-US",
+    "gender": "female",
+    "base_settings": {
+        "pitch": 1.1,
+        "speed": 1.0,
+        "volume": 1.0,
+        "tone": "neutral",
+        "modulation": "medium"
+    },
+    "personality_traits": {
+        "confidence": 0.8,
+        "energy": 0.7,
+        "assertiveness": 0.6
+    },
+    "emotion_modifiers": {
+        "happy": {
+            "pitch_multiplier": 1.15,
+            "speed_multiplier": 1.1,
+            "volume_multiplier": 1.0
+        },
+        "sad": {
+            "pitch_multiplier": 0.95,
+            "speed_multiplier": 0.9,
+            "volume_multiplier": 0.8
+        },
+        "angry": {
+            "pitch_multiplier": 1.05,
+            "speed_multiplier": 1.0,
+            "volume_multiplier": 1.2
+        },
+        "fear": {
+            "pitch_multiplier": 1.25,
+            "speed_multiplier": 1.2,
+            "volume_multiplier": 1.1
+        },
+        "calm": {
+            "pitch_multiplier": 1.0,
+            "speed_multiplier": 0.9,
+            "volume_multiplier": 0.9
+        }
+    },
+    "speech_patterns": {
+        "greeting": "Hi there! How may I assist you today?",
+        "farewell": "Take care! Have a wonderful day!",
+        "thinking": "Let me think about that for a moment...",
+        "confirmation": "I understand completely.",
+        "confusion": "I'm not entirely sure I understand.",
+        "apology": "I'm sorry for any confusion."
+    }
+} 

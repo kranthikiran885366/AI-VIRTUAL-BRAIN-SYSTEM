@@ -1,0 +1,53 @@
+# Emotion Model Training Configuration
+
+# Data settings
+feature_columns:
+  - heart_rate
+  - skin_conductance
+  - facial_muscle_activity
+  - voice_pitch
+  - voice_intensity
+  - body_temperature
+  - breathing_rate
+  - eye_movement
+  - posture
+  - gesture_frequency
+
+label_column: emotion
+
+# Model settings
+model_type: random_forest
+n_estimators: 100
+max_depth: 10
+random_state: 42
+
+# Training settings
+test_size: 0.2
+validation_size: 0.1
+batch_size: 32
+epochs: 50
+learning_rate: 0.001
+
+# Preprocessing settings
+normalize_features: true
+handle_missing_values: true
+feature_selection: true
+
+# Evaluation settings
+metrics:
+  - accuracy
+  - precision
+  - recall
+  - f1_score
+  - confusion_matrix
+
+# Output settings
+save_model: true
+save_scaler: true
+save_config: true
+save_metrics: true
+
+# Logging settings
+log_level: INFO
+save_training_history: true
+visualize_results: true 

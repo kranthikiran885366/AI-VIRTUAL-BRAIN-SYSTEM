@@ -1,0 +1,274 @@
+{
+    "name": "eye_tracking_tests",
+    "description": "Test cases for eye tracking functionality",
+    "tests": [
+        {
+            "name": "basic_eye_tracking",
+            "description": "Test basic eye tracking functionality",
+            "input_data": {
+                "type": "eye_tracking",
+                "frame": {
+                    "width": 640,
+                    "height": 480,
+                    "channels": 3
+                },
+                "expected_landmarks": {
+                    "left_eye": [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398],
+                    "right_eye": [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+                }
+            },
+            "expected_output": {
+                "success": true,
+                "pupil_position": {
+                    "x": {
+                        "min": 0.0,
+                        "max": 1.0
+                    },
+                    "y": {
+                        "min": 0.0,
+                        "max": 1.0
+                    }
+                },
+                "confidence": {
+                    "min": 0.8
+                }
+            },
+            "timeout": 5.0,
+            "priority": 1
+        },
+        {
+            "name": "eye_movement_tracking",
+            "description": "Test eye movement tracking",
+            "input_data": {
+                "type": "eye_tracking",
+                "movement_sequence": [
+                    {
+                        "direction": "left",
+                        "duration": 0.5
+                    },
+                    {
+                        "direction": "right",
+                        "duration": 0.5
+                    },
+                    {
+                        "direction": "up",
+                        "duration": 0.5
+                    },
+                    {
+                        "direction": "down",
+                        "duration": 0.5
+                    }
+                ]
+            },
+            "expected_output": {
+                "success": true,
+                "movement_types": {
+                    "saccade": {
+                        "count": {
+                            "min": 3,
+                            "max": 5
+                        }
+                    },
+                    "smooth_pursuit": {
+                        "count": {
+                            "min": 1,
+                            "max": 2
+                        }
+                    }
+                },
+                "accuracy": {
+                    "min": 0.8
+                }
+            },
+            "timeout": 10.0,
+            "priority": 2
+        },
+        {
+            "name": "blink_detection",
+            "description": "Test blink detection",
+            "input_data": {
+                "type": "blink_analysis",
+                "blink_sequence": [
+                    {
+                        "duration": 0.2,
+                        "interval": 2.0
+                    },
+                    {
+                        "duration": 0.15,
+                        "interval": 1.5
+                    },
+                    {
+                        "duration": 0.25,
+                        "interval": 2.5
+                    }
+                ]
+            },
+            "expected_output": {
+                "success": true,
+                "blink_count": 3,
+                "average_duration": {
+                    "min": 0.15,
+                    "max": 0.25
+                },
+                "detection_accuracy": {
+                    "min": 0.9
+                }
+            },
+            "timeout": 10.0,
+            "priority": 2
+        },
+        {
+            "name": "pupil_dilation",
+            "description": "Test pupil dilation tracking",
+            "input_data": {
+                "type": "pupil_dilation",
+                "light_sequence": [
+                    {
+                        "level": "bright",
+                        "duration": 2.0
+                    },
+                    {
+                        "level": "dark",
+                        "duration": 2.0
+                    },
+                    {
+                        "level": "bright",
+                        "duration": 2.0
+                    }
+                ]
+            },
+            "expected_output": {
+                "success": true,
+                "pupil_size_changes": {
+                    "count": {
+                        "min": 2,
+                        "max": 4
+                    }
+                },
+                "response_time": {
+                    "max": 0.5
+                },
+                "accuracy": {
+                    "min": 0.8
+                }
+            },
+            "timeout": 10.0,
+            "priority": 2
+        },
+        {
+            "name": "focus_control",
+            "description": "Test focus control",
+            "input_data": {
+                "type": "focus_control",
+                "target_sequence": [
+                    {
+                        "position": [0.2, 0.2],
+                        "duration": 2.0
+                    },
+                    {
+                        "position": [0.8, 0.8],
+                        "duration": 2.0
+                    },
+                    {
+                        "position": [0.5, 0.5],
+                        "duration": 2.0
+                    }
+                ]
+            },
+            "expected_output": {
+                "success": true,
+                "focus_accuracy": {
+                    "min": 0.8
+                },
+                "response_time": {
+                    "max": 0.3
+                },
+                "attention_level": {
+                    "min": 0.7
+                }
+            },
+            "timeout": 10.0,
+            "priority": 2
+        },
+        {
+            "name": "microsaccades",
+            "description": "Test microsaccade simulation",
+            "input_data": {
+                "type": "microsaccades",
+                "duration": 5.0,
+                "expected_frequency": {
+                    "min": 0.5,
+                    "max": 2.0
+                }
+            },
+            "expected_output": {
+                "success": true,
+                "saccade_count": {
+                    "min": 2,
+                    "max": 10
+                },
+                "amplitude": {
+                    "min": 0.02,
+                    "max": 0.1
+                },
+                "naturalness": {
+                    "min": 0.8
+                }
+            },
+            "timeout": 10.0,
+            "priority": 1
+        },
+        {
+            "name": "agent_integration",
+            "description": "Test integration with other agents",
+            "input_data": {
+                "type": "integration",
+                "agents": {
+                    "memory": true,
+                    "emotion": true,
+                    "learning": true,
+                    "task": true,
+                    "social": true
+                },
+                "scenario": {
+                    "emotion": "surprise",
+                    "intensity": 0.8,
+                    "duration": 5.0
+                }
+            },
+            "expected_output": {
+                "success": true,
+                "agent_responses": {
+                    "memory": {
+                        "recall_accuracy": {
+                            "min": 0.7
+                        }
+                    },
+                    "emotion": {
+                        "detection_accuracy": {
+                            "min": 0.8
+                        }
+                    },
+                    "learning": {
+                        "adaptation_speed": {
+                            "max": 1.0
+                        }
+                    },
+                    "task": {
+                        "priority_adjustment": true
+                    },
+                    "social": {
+                        "interaction_quality": {
+                            "min": 0.7
+                        }
+                    }
+                },
+                "overall_coordination": {
+                    "min": 0.8
+                }
+            },
+            "timeout": 15.0,
+            "priority": 3
+        }
+    ]
+} 

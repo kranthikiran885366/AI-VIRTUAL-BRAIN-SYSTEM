@@ -1,0 +1,108 @@
+# Mouth Agent Configuration
+
+# TTS Engine Settings
+tts_engine: "elevenlabs"  # Options: elevenlabs, pyttsx3
+default_voice_profile: "english_male"
+
+# Voice Settings
+speech_rate: 1.0
+volume: 1.0
+pitch: 1.0
+
+# API Settings
+api_host: "0.0.0.0"
+api_port: 8000
+
+# Logging Settings
+log_level: "INFO"
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Voice Profiles
+voice_profiles:
+  english_male:
+    pitch: 1.0
+    speed: 1.0
+    volume: 1.0
+    tone: "neutral"
+    modulation: "medium"
+    language: "en-US"
+    gender: "male"
+  
+  english_female:
+    pitch: 1.1
+    speed: 1.0
+    volume: 1.0
+    tone: "neutral"
+    modulation: "medium"
+    language: "en-US"
+    gender: "female"
+  
+  hindi_female:
+    pitch: 1.0
+    speed: 1.0
+    volume: 1.0
+    tone: "neutral"
+    modulation: "medium"
+    language: "hi-IN"
+    gender: "female"
+
+# Emotion Mappings
+emotion_mappings:
+  happy:
+    pitch: 1.2
+    speed: 1.1
+    volume: 1.0
+    tone: "cheerful"
+    modulation: "high"
+  
+  sad:
+    pitch: 0.9
+    speed: 0.9
+    volume: 0.8
+    tone: "soft"
+    modulation: "low"
+  
+  angry:
+    pitch: 1.1
+    speed: 1.0
+    volume: 1.2
+    tone: "harsh"
+    modulation: "medium"
+  
+  fear:
+    pitch: 1.3
+    speed: 1.2
+    volume: 1.1
+    tone: "nervous"
+    modulation: "high"
+  
+  calm:
+    pitch: 1.0
+    speed: 0.9
+    volume: 0.9
+    tone: "gentle"
+    modulation: "low"
+  
+  neutral:
+    pitch: 1.0
+    speed: 1.0
+    volume: 1.0
+    tone: "neutral"
+    modulation: "medium"
+
+# Speech Templates
+speech_templates:
+  greeting:
+    joy: "Hey there! How are you today?"
+    neutral: "Hello. How can I help you?"
+    sad: "Hi... I hope you're doing okay."
+  
+  alert:
+    fear: "Warning! {message} Please stay alert!"
+    urgent: "Attention! {message}"
+    neutral: "Notice: {message}"
+  
+  thought:
+    neutral: "I think {content}"
+    joy: "I'm happy to say that {content}"
+    sad: "I'm sad to report that {content}" 

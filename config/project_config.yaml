@@ -1,0 +1,167 @@
+# Project Configuration
+
+# Paths
+paths:
+  models_dir: "models"
+  datasets_dir: "datasets"
+  logs_dir: "logs"
+  output_dir: "output"
+  config_dir: "config"
+
+# Vision Model Configuration
+vision_model:
+  camera:
+    device_id: 0
+    width: 640
+    height: 480
+    fps: 30
+    flip_horizontal: false
+
+  object_detection:
+    model_path: "models/vision_model/weights/object_detection_model.onnx"
+    confidence_threshold: 0.5
+    classes: ["person", "car", "dog", "cat", "chair", "table"]
+    enable_tracking: true
+    tracking_history: 30
+
+  image_processing:
+    resize: true
+    target_width: 640
+    target_height: 480
+    normalize: true
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+    enable_histogram_equalization: true
+    enable_gaussian_blur: false
+    blur_kernel_size: 5
+
+  display:
+    show_boxes: true
+    show_labels: true
+    show_scores: true
+    show_fps: true
+    window_name: "Eyes Agent"
+
+  logging:
+    log_dir: "logs/vision"
+    max_logs: 5
+    log_level: "INFO"
+
+# Face Recognition Model Configuration
+face_recognition_model:
+  face_detection:
+    model_path: "models/face_recognition_model/weights/face_detection_model.pt"
+    confidence_threshold: 0.5
+    min_face_size: 20
+    max_face_size: 1000
+    enable_landmarks: true
+    enable_3d_pose: true
+
+  face_recognition:
+    model_path: "models/face_recognition_model/weights/face_recognition_model.pt"
+    embedding_size: 512
+    similarity_threshold: 0.6
+    enable_gender: true
+    enable_age: true
+
+  tracking:
+    max_track_history: 30
+    min_track_length: 5
+    max_track_gap: 30
+
+  logging:
+    log_dir: "logs/face_recognition"
+    max_logs: 5
+    log_level: "INFO"
+
+# Emotion Model Configuration
+emotion_model:
+  model_path: "models/emotion_model/weights/emotion_model.pt"
+  emotions: ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
+  confidence_threshold: 0.5
+  enable_intensity: true
+  enable_temporal: true
+
+  logging:
+    log_dir: "logs/emotion"
+    max_logs: 5
+    log_level: "INFO"
+
+# Planning Model Configuration
+planning_model:
+  task_planning:
+    max_planning_steps: 10
+    enable_parallel_tasks: true
+    resource_constraints: true
+
+  decision_making:
+    confidence_threshold: 0.7
+    enable_uncertainty: true
+    enable_exploration: true
+
+  logging:
+    log_dir: "logs/planning"
+    max_logs: 5
+    log_level: "INFO"
+
+# Language Model Configuration
+language_model:
+  model_path: "models/language_model/weights/language_model.pt"
+  max_sequence_length: 512
+  enable_intent: true
+  enable_entities: true
+  enable_sentiment: true
+
+  logging:
+    log_dir: "logs/language"
+    max_logs: 5
+    log_level: "INFO"
+
+# Motivation Model Configuration
+motivation_model:
+  goal_management:
+    max_goals: 5
+    goal_priority: true
+    goal_deadline: true
+
+  reward_prediction:
+    enable_discounting: true
+    discount_factor: 0.9
+    enable_intrinsic: true
+
+  logging:
+    log_dir: "logs/motivation"
+    max_logs: 5
+    log_level: "INFO"
+
+# Voice Model Configuration
+voice_model:
+  speech_recognition:
+    model_path: "models/voice_model/weights/speech_recognition_model.pt"
+    sample_rate: 16000
+    enable_vad: true
+    enable_diarization: true
+
+  speech_synthesis:
+    model_path: "models/voice_model/weights/speech_synthesis_model.pt"
+    sample_rate: 22050
+    enable_emotion: true
+    enable_style: true
+
+  logging:
+    log_dir: "logs/voice"
+    max_logs: 5
+    log_level: "INFO"
+
+# System Configuration
+system:
+  enable_gpu: true
+  num_threads: 4
+  memory_limit: 8192  # MB
+  enable_profiling: true
+  enable_debug: false
+
+  logging:
+    log_dir: "logs/system"
+    max_logs: 5
+    log_level: "INFO" 

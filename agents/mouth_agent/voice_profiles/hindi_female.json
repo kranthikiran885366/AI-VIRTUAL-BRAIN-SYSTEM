@@ -1,0 +1,52 @@
+{
+    "name": "hindi_female",
+    "language": "hi-IN",
+    "gender": "female",
+    "base_settings": {
+        "pitch": 1.0,
+        "speed": 1.0,
+        "volume": 1.0,
+        "tone": "neutral",
+        "modulation": "medium"
+    },
+    "personality_traits": {
+        "confidence": 0.75,
+        "energy": 0.65,
+        "assertiveness": 0.55
+    },
+    "emotion_modifiers": {
+        "happy": {
+            "pitch_multiplier": 1.2,
+            "speed_multiplier": 1.1,
+            "volume_multiplier": 1.0
+        },
+        "sad": {
+            "pitch_multiplier": 0.9,
+            "speed_multiplier": 0.9,
+            "volume_multiplier": 0.8
+        },
+        "angry": {
+            "pitch_multiplier": 1.1,
+            "speed_multiplier": 1.0,
+            "volume_multiplier": 1.2
+        },
+        "fear": {
+            "pitch_multiplier": 1.3,
+            "speed_multiplier": 1.2,
+            "volume_multiplier": 1.1
+        },
+        "calm": {
+            "pitch_multiplier": 1.0,
+            "speed_multiplier": 0.9,
+            "volume_multiplier": 0.9
+        }
+    },
+    "speech_patterns": {
+        "greeting": "नमस्ते! मैं आपकी कैसे मदद कर सकती हूं?",
+        "farewell": "अलविदा! आपका दिन शुभ हो!",
+        "thinking": "हम्म, मुझे इस बारे में सोचने दीजिए...",
+        "confirmation": "हाँ, मैं समझ गई।",
+        "confusion": "मुझे पूरी तरह समझ नहीं आया।",
+        "apology": "मैं किसी भी भ्रम के लिए क्षमा चाहती हूं।"
+    }
+} 

@@ -1,0 +1,295 @@
+# Logging Configuration
+
+# Root Logger Configuration
+root:
+  level: INFO
+  handlers:
+    - console
+    - file
+    - syslog
+  propagate: true
+
+# Console Handler
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: standard
+    stream: ext://sys.stdout
+
+  file:
+    class: logging.handlers.RotatingFileHandler
+    level: INFO
+    formatter: detailed
+    filename: logs/virtual_brain.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 5
+    encoding: utf8
+
+  syslog:
+    class: logging.handlers.SysLogHandler
+    level: WARNING
+    formatter: syslog
+    address: /dev/log
+    facility: local0
+
+# Formatters
+formatters:
+  standard:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+
+  detailed:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+
+  syslog:
+    format: 'virtual_brain[%(process)d]: %(name)s %(levelname)s - %(message)s'
+
+# Logger Configurations
+loggers:
+  api_gateway:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  orchestrator:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  communication_bus:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  memory_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  emotion_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  task_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  learning_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  social_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  perception_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  creativity_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  self_reflection_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  attention_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  motor_control_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  language_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  planning_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  motivation_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  intuition_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  sleep_rest_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  pain_discomfort_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  ethics_morality_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  humor_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  spatial_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  sensory_integration_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  language_production_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  executive_function_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  stress_anxiety_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  trust_relationship_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  creativity_control_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  sensory_memory_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+  body_awareness_agent:
+    level: INFO
+    handlers:
+      - console
+      - file
+    propagate: false
+
+# Filter Configurations
+filters:
+  sensitive_data:
+    class: virtual_brain.utils.logging.SensitiveDataFilter
+    patterns:
+      - 'password'
+      - 'token'
+      - 'key'
+      - 'secret'
+
+# Log Rotation
+rotation:
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+  interval: 86400  # 24 hours
+
+# Log Aggregation
+aggregation:
+  enabled: true
+  host: localhost
+  port: 5000
+  protocol: tcp
+  batch_size: 100
+  batch_timeout: 5  # seconds
+
+# Error Reporting
+error_reporting:
+  enabled: true
+  service: sentry
+  dsn: ""
+  environment: development
+  level: ERROR
+  ignore_errors:
+    - KeyboardInterrupt
+    - SystemExit 

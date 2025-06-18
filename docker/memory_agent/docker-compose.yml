@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  memory_agent:
+    build:
+      context: ../..
+      dockerfile: docker/memory_agent/Dockerfile
+    container_name: memory_agent
+    environment:
+      - MEMORY_AGENT_API_HOST=0.0.0.0
+      - MEMORY_AGENT_API_PORT=8000
+      - MEMORY_AGENT_API_DEBUG=true
+      - MEMORY_AGENT_LOG_LEVEL=DEBUG
+      - MEMORY_AGENT_REDIS_HOST=redis
+      - MEMORY_AGENT_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    ports:
+      - "8000:8000"  # API
+      - "9090:9090"  # Prometheus metrics
+    volumes:
+      - memory_data:/app/databases/memory_db
+    depends_on:
+      - redis
+      - kafka
+    networks:
+      - virtual_brain_network
+
+  redis:
+    image: redis:6.2-alpine
+    container_name: memory_agent_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - virtual_brain_network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.0
+    container_name: memory_agent_kafka
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - virtual_brain_network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.0
+    container_name: memory_agent_zookeeper
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+    ports:
+      - "2181:2181"
+    networks:
+      - virtual_brain_network
+
+volumes:
+  memory_data:
+  redis_data:
+
+networks:
+  virtual_brain_network:
+    name: virtual_brain_network 

@@ -1,0 +1,162 @@
+ # Ear Agent Configuration
+
+# Audio Capture Settings
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  format: "int16"
+  device_index: null  # Auto-select default device
+  timeout: 5  # Seconds to wait for audio input
+  silence_threshold: 0.01
+  silence_duration: 1.0  # Seconds of silence to consider end of speech
+
+# Speech Recognition Settings
+speech_recognition:
+  engine: "whisper"  # Options: whisper, google, vosk
+  language: "en-US"
+  model_size: "base"  # For Whisper: tiny, base, small, medium, large
+  confidence_threshold: 0.7
+  continuous_listening: true
+  wake_word: "hey zet"
+  wake_word_threshold: 0.8
+
+# Sound Classification Settings
+sound_classification:
+  model: "yamnet"
+  confidence_threshold: 0.6
+  supported_sounds:
+    - "speech"
+    - "music"
+    - "noise"
+    - "silence"
+    - "alarm"
+    - "siren"
+    - "doorbell"
+    - "knock"
+    - "clap"
+    - "crying"
+    - "scream"
+    - "gunshot"
+    - "explosion"
+    - "fire_alarm"
+    - "ambient"
+
+# Speaker Identification Settings
+speaker_identification:
+  enabled: true
+  model: "resemblyzer"
+  min_samples: 3  # Minimum samples needed for speaker recognition
+  confidence_threshold: 0.7
+  max_speakers: 5  # Maximum number of speakers to track
+
+# Emotion Detection Settings
+emotion_detection:
+  enabled: true
+  model: "speechbrain"
+  supported_emotions:
+    - "happy"
+    - "sad"
+    - "angry"
+    - "fear"
+    - "calm"
+    - "neutral"
+  confidence_threshold: 0.6
+  window_size: 3  # Seconds of audio to analyze for emotion
+
+# Language Detection Settings
+language_detection:
+  enabled: true
+  supported_languages:
+    - "en-US"
+    - "hi-IN"
+    - "es-ES"
+    - "fr-FR"
+    - "de-DE"
+    - "ja-JP"
+    - "zh-CN"
+    - "ru-RU"
+  confidence_threshold: 0.7
+
+# Intent Detection Settings
+intent_detection:
+  enabled: true
+  model: "rasa"
+  confidence_threshold: 0.7
+  supported_intents:
+    - "greeting"
+    - "farewell"
+    - "command"
+    - "question"
+    - "statement"
+    - "emergency"
+    - "unknown"
+
+# Noise Filtering Settings
+noise_filtering:
+  enabled: true
+  method: "rnnoise"  # Options: rnnoise, webrtc
+  noise_reduction_level: 0.7
+  adaptive_filtering: true
+
+# API Settings
+api:
+  host: "0.0.0.0"
+  port: 8005
+  debug: false
+  timeout: 30
+  max_connections: 100
+
+# Logging Settings
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/ear_agent.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
+
+# Agent Integration Settings
+agent_integration:
+  perception_agent:
+    url: "http://localhost:8001"
+    timeout: 5
+  emotion_agent:
+    url: "http://localhost:8002"
+    timeout: 5
+  thought_agent:
+    url: "http://localhost:8003"
+    timeout: 5
+  decision_agent:
+    url: "http://localhost:8004"
+    timeout: 5
+  mouth_agent:
+    url: "http://localhost:8000"
+    timeout: 5
+  memory_agent:
+    url: "http://localhost:8006"
+    timeout: 5
+  eye_agent:
+    url: "http://localhost:8007"
+    timeout: 5
+
+# Alert Settings
+alerts:
+  enabled: true
+  critical_sounds:
+    - "scream"
+    - "gunshot"
+    - "explosion"
+    - "fire_alarm"
+  notification_channels:
+    - "email"
+    - "push"
+    - "sms"
+  cooldown_period: 300  # Seconds between repeated alerts
+
+# Performance Settings
+performance:
+  max_audio_length: 30  # Maximum seconds of audio to process at once
+  batch_size: 32
+  use_gpu: true
+  num_threads: 4
+  cache_size: 1000  # Number of audio samples to cache

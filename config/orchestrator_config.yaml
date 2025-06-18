@@ -1,0 +1,155 @@
+# Orchestrator Configuration
+
+# System Settings
+system:
+  max_concurrent_agents: 100
+  system_load_threshold: 0.8
+  resource_allocation_strategy: "balanced"  # balanced, performance, efficiency
+  emergency_shutdown_threshold: 0.95
+
+# Agent Management
+agent_management:
+  startup_sequence:
+    - memory_agent
+    - emotion_agent
+    - task_agent
+    - learning_agent
+    - social_agent
+    - perception_agent
+    - creativity_agent
+    - self_reflection_agent
+    - attention_agent
+    - motor_control_agent
+    - language_agent
+    - planning_agent
+    - motivation_agent
+    - intuition_agent
+    - sleep_rest_agent
+    - pain_discomfort_agent
+    - ethics_morality_agent
+    - humor_agent
+    - spatial_agent
+    - sensory_integration_agent
+    - language_production_agent
+    - executive_function_agent
+    - stress_anxiety_agent
+    - trust_relationship_agent
+    - creativity_control_agent
+    - sensory_memory_agent
+    - body_awareness_agent
+
+  shutdown_sequence:
+    - body_awareness_agent
+    - sensory_memory_agent
+    - creativity_control_agent
+    - trust_relationship_agent
+    - stress_anxiety_agent
+    - executive_function_agent
+    - language_production_agent
+    - sensory_integration_agent
+    - spatial_agent
+    - humor_agent
+    - ethics_morality_agent
+    - pain_discomfort_agent
+    - sleep_rest_agent
+    - intuition_agent
+    - motivation_agent
+    - planning_agent
+    - language_agent
+    - motor_control_agent
+    - attention_agent
+    - self_reflection_agent
+    - creativity_agent
+    - perception_agent
+    - social_agent
+    - learning_agent
+    - task_agent
+    - emotion_agent
+    - memory_agent
+
+# Resource Allocation
+resource_allocation:
+  cpu:
+    default_allocation: 0.1  # 10% of CPU per agent
+    max_allocation: 0.3  # 30% of CPU per agent
+    min_allocation: 0.05  # 5% of CPU per agent
+  memory:
+    default_allocation: 256  # MB
+    max_allocation: 1024  # MB
+    min_allocation: 128  # MB
+  priority_levels:
+    critical: 1
+    high: 2
+    medium: 3
+    low: 4
+
+# Communication Settings
+communication:
+  message_queue_size: 1000
+  max_message_size: 1048576  # 1MB
+  retry_attempts: 3
+  timeout: 5  # seconds
+  heartbeat_interval: 10  # seconds
+
+# Task Scheduling
+task_scheduling:
+  max_concurrent_tasks: 50
+  task_priority_levels:
+    - critical
+    - high
+    - medium
+    - low
+  scheduling_algorithm: "priority_based"  # priority_based, round_robin, fair
+  task_timeout: 300  # seconds
+
+# Health Monitoring
+health_monitoring:
+  check_interval: 10  # seconds
+  failure_threshold: 3
+  recovery_attempts: 3
+  metrics_collection_interval: 60  # seconds
+  alert_thresholds:
+    cpu_usage: 0.8
+    memory_usage: 0.8
+    disk_usage: 0.8
+    network_usage: 0.8
+
+# Logging Configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  rotation:
+    max_size: 10485760  # 10MB
+    backup_count: 5
+  handlers:
+    - file
+    - console
+    - syslog
+
+# Security Settings
+security:
+  authentication_required: true
+  authorization_levels:
+    - admin
+    - operator
+    - viewer
+  ssl_enabled: true
+  encryption_algorithm: "AES-256-GCM"
+  key_rotation_interval: 86400  # 24 hours
+
+# Backup and Recovery
+backup:
+  enabled: true
+  interval: 3600  # 1 hour
+  retention_period: 604800  # 7 days
+  compression_enabled: true
+  encryption_enabled: true
+
+# Performance Optimization
+performance:
+  cache_enabled: true
+  cache_size: 1048576  # 1MB
+  cache_ttl: 300  # 5 minutes
+  connection_pool_size: 20
+  thread_pool_size: 10
+  async_operations: true 

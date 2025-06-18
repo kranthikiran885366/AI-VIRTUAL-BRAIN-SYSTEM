@@ -1,0 +1,94 @@
+# Perception Agent Configuration
+
+# Vision settings
+vision:
+  target_image_size: [224, 224]
+  face_detection:
+    scale_factor: 1.1
+    min_neighbors: 5
+    min_size: [30, 30]
+  object_detection:
+    confidence_threshold: 0.5
+    max_objects: 10
+  scene_analysis:
+    model: "resnet50"
+    batch_size: 32
+
+# Face recognition settings
+face_recognition:
+  known_faces_path: "data/known_faces.json"
+  recognition_threshold: 0.8
+  feature_vector_size: 128
+  max_faces: 1000
+  update_interval: 3600  # seconds
+
+# Touch processing settings
+touch:
+  max_touch_history: 100
+  pressure_thresholds:
+    light: 0.2
+    medium: 0.5
+    heavy: 0.8
+  temperature_thresholds:
+    cold: 15
+    cool: 25
+    warm: 35
+    hot: 40
+  movement:
+    min_distance: 0.1
+    direction_threshold: 45  # degrees
+
+# Integration settings
+integration:
+  confidence_weights:
+    visual: 0.7
+    tactile: 0.3
+  validation:
+    cross_modal_threshold: 0.6
+    temporal_window: 5  # seconds
+
+# Storage settings
+storage:
+  base_path: "data/perception"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+
+# Performance settings
+performance:
+  cache_size: 1000
+  cleanup_interval: 3600  # seconds
+  max_concurrent_requests: 10
+  batch_processing: true
+  batch_size: 32
+
+# Logging settings
+logging:
+  level: "INFO"
+  file: "logs/perception_agent.log"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+
+# Model settings
+models:
+  face_recognition:
+    provider: "dlib"
+    model: "shape_predictor_68_face_landmarks.dat"
+    confidence_threshold: 0.8
+  object_detection:
+    provider: "tensorflow"
+    model: "ssd_mobilenet_v2"
+    confidence_threshold: 0.5
+  scene_analysis:
+    provider: "pytorch"
+    model: "resnet50"
+    pretrained: true
+
+# Security settings
+security:
+  max_requests_per_minute: 60
+  allowed_origins: ["*"]
+  require_authentication: true
+  token_expiry: 3600  # seconds
+  encryption:
+    enabled: true
+    algorithm: "AES-256" 

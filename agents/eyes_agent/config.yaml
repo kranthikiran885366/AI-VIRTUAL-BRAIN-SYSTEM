@@ -1,0 +1,104 @@
+# Eyes Agent Configuration
+
+# Camera settings
+camera:
+  camera_id: 0
+  resolution: [640, 480]
+  fps: 30
+  rotation: 0
+  metrics_file: "data/camera_metrics.json"
+
+# Object detection settings
+object_detection:
+  model_path: "models/yolov4.weights"
+  config_path: "models/yolov4.cfg"
+  classes_path: "models/coco.names"
+  confidence_threshold: 0.5
+  nms_threshold: 0.4
+  target_classes: []  # Empty list means detect all classes
+
+# Face tracking settings
+face_tracking:
+  face_cascade_path: "models/haarcascade_frontalface_default.xml"
+  eye_cascade_path: "models/haarcascade_eye.xml"
+  min_face_size: [30, 30]
+  tracking_history: 30
+  confidence_threshold: 0.5
+
+# Image processing settings
+image_processing:
+  enable_denoising: true
+  enable_sharpening: true
+  enable_contrast: true
+  enable_color_correction: true
+  
+  # Denoising parameters
+  denoising_strength: 10
+  denoising_template_size: 7
+  denoising_search_size: 21
+  
+  # Contrast parameters
+  clahe_clip_limit: 2.0
+  clahe_grid_size: [8, 8]
+  
+  # Color correction parameters
+  color_temperature: 0
+  color_tint: 0
+  color_saturation: 1.0
+
+# Logging settings
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/eyes_agent.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
+
+# Metrics settings
+metrics:
+  file: "data/eyes_metrics.json"
+  update_interval: 60  # seconds
+
+# Resource limits
+resources:
+  max_memory_usage: 1024  # MB
+  max_cpu_usage: 80  # percentage
+  max_disk_usage: 1024  # MB
+
+# Display settings
+display:
+  show_fps: true
+  show_boxes: true
+  box_thickness: 2
+  text_scale: 0.5
+  text_thickness: 1
+  colors:
+    face: [0, 255, 0]  # Green
+    object: [255, 0, 0]  # Blue
+    text: [255, 255, 255]  # White
+
+# Integration settings
+integration:
+  enable_automation: false
+  trigger_events:
+    - "face_detected"
+    - "object_detected"
+  actions:
+    - "take_screenshot"
+    - "record_video"
+    - "send_notification"
+
+# Security settings
+security:
+  encryption_enabled: true
+  encryption_key_file: "config/encryption.key"
+  access_token_file: "config/access_token.json"
+
+# Feature flags
+features:
+  real_time_processing: true
+  multi_face_tracking: true
+  object_tracking: true
+  image_enhancement: true
+  metrics_collection: true
+  error_handling: true 

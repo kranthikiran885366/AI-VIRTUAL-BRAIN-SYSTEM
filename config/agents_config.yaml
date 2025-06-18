@@ -1,0 +1,178 @@
+# Global Agent Configuration
+
+# Agent Lifecycle Settings
+agent_lifecycle:
+  startup_timeout: 30  # seconds
+  shutdown_timeout: 30  # seconds
+  health_check_interval: 10  # seconds
+  max_retry_attempts: 3
+
+# Communication Settings
+communication:
+  message_timeout: 5  # seconds
+  max_message_size: 1048576  # 1MB
+  retry_interval: 1  # seconds
+  max_retries: 3
+
+# Memory Agent Configuration
+memory_agent:
+  short_term_capacity: 1000  # items
+  long_term_capacity: 1000000  # items
+  memory_consolidation_interval: 300  # seconds
+  cleanup_interval: 3600  # seconds
+
+# Emotion Agent Configuration
+emotion_agent:
+  emotion_update_interval: 1  # seconds
+  mood_tracking_window: 3600  # seconds
+  empathy_threshold: 0.7
+
+# Task Agent Configuration
+task_agent:
+  max_concurrent_tasks: 10
+  task_timeout: 300  # seconds
+  retry_interval: 5  # seconds
+
+# Learning Agent Configuration
+learning_agent:
+  knowledge_update_interval: 60  # seconds
+  error_correction_threshold: 0.8
+  self_improvement_interval: 3600  # seconds
+
+# Social Agent Configuration
+social_agent:
+  relationship_update_interval: 300  # seconds
+  social_cue_processing_interval: 1  # seconds
+  max_relationships: 1000
+
+# Perception Agent Configuration
+perception_agent:
+  vision_update_interval: 0.1  # seconds
+  face_recognition_confidence: 0.8
+  touch_sensitivity: 0.7
+
+# Creativity Agent Configuration
+creativity_agent:
+  idea_generation_interval: 60  # seconds
+  humor_threshold: 0.6
+  max_creative_attempts: 5
+
+# Self-Reflection Agent Configuration
+self_reflection_agent:
+  reflection_interval: 3600  # seconds
+  metacognition_depth: 3
+  internal_monitor_interval: 60  # seconds
+
+# Attention Agent Configuration
+attention_agent:
+  focus_update_interval: 0.5  # seconds
+  distraction_threshold: 0.3
+  max_focus_duration: 3600  # seconds
+
+# Motor Control Agent Configuration
+motor_control_agent:
+  motion_planning_interval: 0.1  # seconds
+  actuator_update_interval: 0.05  # seconds
+  max_velocity: 1.0
+
+# Language Agent Configuration
+language_agent:
+  understanding_threshold: 0.7
+  translation_confidence: 0.8
+  processing_timeout: 5  # seconds
+
+# Planning Agent Configuration
+planning_agent:
+  goal_update_interval: 60  # seconds
+  schedule_optimization_interval: 300  # seconds
+  max_goals: 100
+
+# Motivation Agent Configuration
+motivation_agent:
+  reward_update_interval: 1  # seconds
+  motivation_decay_rate: 0.1
+  max_motivation_level: 1.0
+
+# Intuition Agent Configuration
+intuition_agent:
+  pattern_recognition_interval: 1  # seconds
+  subconscious_processing_interval: 0.1  # seconds
+  confidence_threshold: 0.6
+
+# Sleep Rest Agent Configuration
+sleep_rest_agent:
+  memory_consolidation_interval: 3600  # seconds
+  circadian_rhythm_interval: 60  # seconds
+  rest_threshold: 0.3
+
+# Pain Discomfort Agent Configuration
+pain_discomfort_agent:
+  conflict_check_interval: 1  # seconds
+  feedback_threshold: 0.5
+  max_discomfort_level: 1.0
+
+# Ethics Morality Agent Configuration
+ethics_morality_agent:
+  moral_judgement_interval: 1  # seconds
+  ethical_decision_threshold: 0.8
+  max_ethical_confidence: 1.0
+
+# Humor Agent Configuration
+humor_agent:
+  joke_generation_interval: 300  # seconds
+  humor_threshold: 0.6
+  max_joke_attempts: 3
+
+# Spatial Agent Configuration
+spatial_agent:
+  spatial_update_interval: 0.1  # seconds
+  navigation_confidence: 0.8
+  max_spatial_complexity: 1000
+
+# Sensory Integration Agent Configuration
+sensory_integration_agent:
+  fusion_interval: 0.1  # seconds
+  integration_threshold: 0.7
+  max_sensory_inputs: 100
+
+# Language Production Agent Configuration
+language_production_agent:
+  speech_generation_interval: 0.1  # seconds
+  text_generation_timeout: 5  # seconds
+  max_output_length: 1000
+
+# Executive Function Agent Configuration
+executive_function_agent:
+  task_switching_interval: 1  # seconds
+  impulse_control_threshold: 0.7
+  max_concurrent_processes: 10
+
+# Stress Anxiety Agent Configuration
+stress_anxiety_agent:
+  stress_check_interval: 1  # seconds
+  anxiety_threshold: 0.7
+  max_stress_level: 1.0
+
+# Trust Relationship Agent Configuration
+trust_relationship_agent:
+  trust_update_interval: 300  # seconds
+  bond_strength_threshold: 0.6
+  max_trust_level: 1.0
+
+# Creativity Control Agent Configuration
+creativity_control_agent:
+  idea_evaluation_interval: 1  # seconds
+  filter_threshold: 0.7
+  max_creative_outputs: 100
+
+# Sensory Memory Agent Configuration
+sensory_memory_agent:
+  buffer_update_interval: 0.1  # seconds
+  max_buffer_size: 1000
+  memory_decay_rate: 0.1
+
+# Body Awareness Agent Configuration
+body_awareness_agent:
+  state_update_interval: 0.1  # seconds
+  avatar_update_interval: 0.05  # seconds
+  max_body_states: 100 

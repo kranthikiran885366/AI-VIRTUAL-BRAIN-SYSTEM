@@ -1,0 +1,77 @@
+# Camera Settings
+camera:
+  device_id: 0  # Default webcam
+  width: 640
+  height: 480
+  fps: 30
+  flip_horizontal: true
+
+# Face Detection Settings
+face_detection:
+  model_path: "models/face_detection_model.pt"
+  confidence_threshold: 0.7
+  min_face_size: 20
+  max_face_size: 300
+  enable_landmarks: true
+  enable_3d_pose: true
+
+# Object Detection Settings
+object_detection:
+  model_path: "models/object_detection_model.onnx"
+  confidence_threshold: 0.5
+  classes: ["person", "car", "dog", "cat", "chair", "table"]
+  enable_tracking: true
+  tracking_history: 30
+
+# Image Processing Settings
+image_processing:
+  resize: true
+  target_width: 640
+  target_height: 480
+  normalize: true
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+  enable_histogram_equalization: false
+  enable_gaussian_blur: false
+  blur_kernel_size: 3
+
+# Display Settings
+display:
+  show_fps: true
+  show_boxes: true
+  show_labels: true
+  show_confidence: true
+  box_color: [0, 255, 0]  # Green
+  text_color: [255, 255, 255]  # White
+  font_scale: 0.5
+  thickness: 2
+
+# Logging Settings
+logging:
+  level: "INFO"
+  save_detections: true
+  output_dir: "logs"
+  max_log_files: 10
+
+# Integration Settings
+integration:
+  enable_emotion_recognition: true
+  enable_face_recognition: true
+  enable_gesture_recognition: false
+  enable_voice_commands: false
+  enable_automation: true
+
+# Automation Settings
+automation:
+  trigger_events:
+    - "face_detected"
+    - "object_detected"
+    - "emotion_detected"
+  actions:
+    - "take_screenshot"
+    - "record_video"
+    - "send_notification"
+  notification:
+    email: "user@example.com"
+    slack_webhook: ""
+    telegram_bot_token: "" 

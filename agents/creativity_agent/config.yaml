@@ -1,0 +1,119 @@
+# Creativity Agent Configuration
+
+# Idea generation settings
+idea_generation:
+  num_ideas_to_generate: 5
+  max_idea_history: 1000
+  evaluation_weights:
+    originality: 0.4
+    feasibility: 0.3
+    impact: 0.3
+  constraints:
+    min_originality: 0.6
+    min_feasibility: 0.5
+    min_impact: 0.4
+
+# Pattern recognition settings
+pattern_recognition:
+  max_pattern_history: 1000
+  pattern_types:
+    structural:
+      enabled: true
+      weight: 0.3
+    temporal:
+      enabled: true
+      weight: 0.3
+    semantic:
+      enabled: true
+      weight: 0.4
+  similarity_threshold: 0.7
+  min_pattern_confidence: 0.6
+
+# Inspiration settings
+inspiration:
+  max_inspiration_history: 1000
+  sources:
+    art:
+      enabled: true
+      weight: 0.2
+      elements: ["visual", "conceptual", "emotional"]
+    science:
+      enabled: true
+      weight: 0.2
+      elements: ["principles", "discoveries", "theories"]
+    nature:
+      enabled: true
+      weight: 0.2
+      elements: ["patterns", "systems", "adaptations"]
+    technology:
+      enabled: true
+      weight: 0.2
+      elements: ["solutions", "advancements", "applications"]
+    culture:
+      enabled: true
+      weight: 0.2
+      elements: ["traditions", "values", "expressions"]
+  relevance_threshold: 0.6
+  max_elements_per_source: 10
+
+# Integration settings
+integration:
+  confidence_weights:
+    idea_generation: 0.4
+    pattern_recognition: 0.3
+    inspiration: 0.3
+  validation:
+    cross_component_threshold: 0.7
+    temporal_window: 5  # seconds
+
+# Storage settings
+storage:
+  base_path: "data/creativity"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+  history:
+    enabled: true
+    max_entries: 1000
+    cleanup_interval: 3600  # seconds
+
+# Performance settings
+performance:
+  cache_size: 1000
+  cleanup_interval: 3600  # seconds
+  max_concurrent_requests: 10
+  batch_processing: true
+  batch_size: 32
+
+# Logging settings
+logging:
+  level: "INFO"
+  file: "logs/creativity_agent.log"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Model settings
+models:
+  idea_generation:
+    provider: "openai"
+    model: "gpt-4"
+    temperature: 0.8
+    max_tokens: 1000
+  pattern_recognition:
+    provider: "tensorflow"
+    model: "bert-base"
+    embedding_size: 768
+  inspiration:
+    provider: "huggingface"
+    model: "gpt2"
+    temperature: 0.7
+
+# Security settings
+security:
+  max_requests_per_minute: 60
+  allowed_origins: ["*"]
+  require_authentication: true
+  token_expiry: 3600  # seconds
+  encryption:
+    enabled: true
+    algorithm: "AES-256" 

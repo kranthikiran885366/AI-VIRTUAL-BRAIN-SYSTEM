@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  task_agent:
+    build:
+      context: ../..
+      dockerfile: docker/task_agent/Dockerfile
+    environment:
+      - TASK_AGENT_API_HOST=0.0.0.0
+      - TASK_AGENT_API_PORT=8002
+      - TASK_AGENT_REDIS_HOST=redis
+      - TASK_AGENT_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - TASK_AGENT_MEMORY_AGENT_URL=http://memory_agent:8000
+      - TASK_AGENT_EMOTION_AGENT_URL=http://emotion_agent:8001
+    ports:
+      - "8002:8002"
+      - "9092:9092"
+    volumes:
+      - task_data:/app/data/tasks
+    depends_on:
+      - redis
+      - kafka
+      - memory_agent
+      - emotion_agent
+    networks:
+      - virtual_brain_network
+
+  redis:
+    image: redis:6.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - virtual_brain_network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.0
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - virtual_brain_network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.0
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+    ports:
+      - "2181:2181"
+    networks:
+      - virtual_brain_network
+
+volumes:
+  task_data:
+  redis_data:
+
+networks:
+  virtual_brain_network:
+    name: virtual_brain_network 

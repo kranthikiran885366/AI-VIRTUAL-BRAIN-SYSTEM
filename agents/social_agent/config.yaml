@@ -1,0 +1,68 @@
+# Social Agent Configuration
+
+# Storage settings
+storage_path: "data/relationships.json"
+max_interaction_history: 100
+
+# Emotion detection settings
+emotion_detection:
+  positive_threshold: 0.6
+  negative_threshold: 0.4
+  neutral_threshold: 0.5
+
+# Trust score settings
+trust_score:
+  initial_value: 0.5
+  min_value: 0.0
+  max_value: 1.0
+  decay_rate: 0.01  # Trust score decay per day of inactivity
+
+# Relationship status thresholds
+relationship_status:
+  new_threshold: 3  # Number of interactions before moving from "new"
+  trusted_threshold: 0.7  # Trust score needed for "trusted" status
+  distrustful_threshold: 0.3  # Trust score below which status becomes "distrustful"
+
+# Formality settings
+formality:
+  default_level: "neutral"
+  adjustment_rate: 0.1  # How quickly formality preferences adapt
+
+# Response generation
+response_generation:
+  max_response_length: 500
+  min_response_length: 10
+  default_emotional_tone: "neutral"
+  context_window: 5  # Number of previous interactions to consider
+
+# Logging settings
+logging:
+  level: "INFO"
+  file: "logs/social_agent.log"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+
+# Performance settings
+performance:
+  cache_size: 1000
+  cleanup_interval: 3600  # seconds
+  max_concurrent_requests: 10
+
+# Integration settings
+integrations:
+  language_model:
+    provider: "openai"
+    model: "gpt-4"
+    temperature: 0.7
+    max_tokens: 150
+
+  emotion_analysis:
+    provider: "azure"
+    confidence_threshold: 0.8
+
+# Security settings
+security:
+  max_requests_per_minute: 60
+  allowed_origins: ["*"]
+  require_authentication: true
+  token_expiry: 3600  # seconds 

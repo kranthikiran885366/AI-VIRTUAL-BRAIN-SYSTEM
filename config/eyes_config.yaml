@@ -1,0 +1,318 @@
+# Eyes Agent Configuration
+
+# Eye tracking settings
+eye_tracking:
+  saccade_threshold: 0.1
+  fixation_threshold: 0.02
+  smooth_pursuit_threshold: 0.05
+  history_size: 100
+
+# Gaze detection settings
+gaze_detection:
+  yolo_config: "models/yolov4.cfg"
+  yolo_weights: "models/yolov4.weights"
+  yolo_classes: "models/coco.names"
+  confidence_threshold: 0.5
+  tracking_iou_threshold: 0.3
+  tracking_timeout: 5.0
+  focus_threshold: 50
+  heatmap_height: 480
+  heatmap_width: 640
+  heatmap_decay: 0.95
+  history_size: 100
+
+# Blink analysis settings
+blink_analysis:
+  eye_cascade_path: "models/haarcascade_eye.xml"
+  closed_threshold: 0.2
+  open_threshold: 0.5
+  max_blink_duration: 0.4
+  fatigue_threshold: 20
+  fatigue_window: 60
+  history_size: 100
+
+# Pupil dilation settings
+pupil_dilation:
+  base_pupil_size: 1.0
+  max_pupil_size: 100.0
+  max_cognitive_load: 1.0
+  recovery_rate: 0.1
+  history_size: 100
+
+# Focus control settings
+focus_control:
+  attention_threshold: 0.5
+  attention_decay: 0.95
+  focus_radius: 100
+  frame_width: 640
+  frame_height: 480
+  history_size: 100
+
+# Microsaccades settings
+microsaccades:
+  enabled: true
+  frequency: 1.0
+  max_amplitude: 0.1
+  min_amplitude: 0.02
+  duration: 0.02
+  random_seed: 42
+  history_size: 100
+
+# Camera settings
+camera:
+  device_id: 0
+  width: 640
+  height: 480
+  fps: 30
+  auto_exposure: true
+  exposure_time: 0.033  # 30 FPS
+  gain: 1.0
+  white_balance: true
+  auto_focus: true
+
+# Perception settings
+perception:
+  model: "yolov8n.pt"  # YOLOv8 nano model
+  confidence_threshold: 0.5
+  iou_threshold: 0.45
+  classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # COCO classes
+  face_detection:
+    model: "retinaface"
+    confidence_threshold: 0.7
+    min_face_size: 20
+  object_tracking:
+    enabled: true
+    max_age: 30
+    min_hits: 3
+    iou_threshold: 0.3
+
+# Vision attention settings
+attention:
+  fovea_radius: 100  # pixels
+  peripheral_blur: 0.5
+  focus_weights:
+    movement: 0.4
+    emotion: 0.3
+    sound: 0.2
+    task: 0.1
+  min_focus_duration: 0.5  # seconds
+  max_focus_duration: 5.0  # seconds
+  saliency_map:
+    enabled: true
+    method: "spectral_residual"
+    scale_factor: 0.5
+  focus_points:
+    max_points: 5
+    decay_rate: 0.95
+    min_confidence: 0.3
+  attention_window:
+    size: 100
+    stride: 50
+  temporal_smoothing:
+    enabled: true
+    window_size: 5
+    alpha: 0.3
+
+# Focus control settings
+focus:
+  saccade_speed: 0.1  # seconds
+  pursuit_speed: 0.2  # seconds
+  smooth_factor: 0.8
+  max_angle: 45  # degrees
+  min_angle: -45  # degrees
+  target_tracking:
+    enabled: true
+    max_speed: 100
+    acceleration: 10
+    smoothing: 0.8
+  depth_estimation:
+    enabled: true
+    method: "stereo"
+    min_depth: 0.1
+    max_depth: 10.0
+  focus_region:
+    size: 200
+    padding: 50
+  stabilization:
+    enabled: true
+    max_displacement: 50
+    smoothing: 0.7
+
+# Memory buffer settings
+memory:
+  buffer_size: 100  # frames
+  retention_time: 10.0  # seconds
+  importance_threshold: 0.7
+  compression_quality: 0.8
+  capacity: 1000
+  frame_buffer:
+    size: 30
+    resolution: [320, 240]
+  feature_buffer:
+    size: 100
+    feature_dim: 512
+  temporal_buffer:
+    size: 60
+    stride: 1
+  persistence:
+    enabled: true
+    save_interval: 300  # seconds
+    path: "data/memory"
+
+# Emotion detection settings
+emotion:
+  model: "emotion_ferplus"
+  confidence_threshold: 0.5
+  emotions: ["neutral", "happy", "sad", "angry", "fear", "disgust", "surprise"]
+  min_confidence: 0.6
+  update_interval: 0.1  # seconds
+  temporal_smoothing:
+    enabled: true
+    window_size: 5
+    alpha: 0.3
+  visualization:
+    enabled: true
+    show_labels: true
+    show_confidence: true
+
+# Eye tracking settings
+tracking:
+  model: "mediapipe"
+  pupil_detection:
+    method: "ellipse_fitting"
+    min_radius: 3
+    max_radius: 15
+    confidence_threshold: 0.7
+  head_pose:
+    enabled: true
+    method: "mediapipe"
+    smoothing: 0.7
+  blink_detection:
+    threshold: 0.2
+    min_duration: 0.1
+    max_duration: 0.4
+  gaze_estimation:
+    enabled: true
+    method: "geometric"
+    calibration_points: 9
+    smoothing: 0.8
+
+# Automation settings
+automation:
+  blink_interval: 4.0  # seconds
+  look_around_interval: 2.0  # seconds
+  memory_update_interval: 0.5  # seconds
+  alert_threshold: 0.8
+  max_focus_duration: 5.0  # seconds
+  min_focus_duration: 0.5  # seconds
+  crowd_threshold: 3
+  enabled: true
+  focus_control:
+    enabled: true
+    auto_focus: true
+    focus_interval: 1.0  # seconds
+  exposure_control:
+    enabled: true
+    target_brightness: 0.5
+    update_interval: 0.5  # seconds
+  white_balance:
+    enabled: true
+    update_interval: 1.0  # seconds
+
+# Processing settings
+processing:
+  num_threads: 4
+  use_gpu: true
+  gpu_id: 0
+  batch_size: 1
+  queue_size: 10
+
+# Logging settings
+logging:
+  level: "INFO"  # or "DEBUG", "WARNING", "ERROR"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/eyes_agent.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
+
+# Monitoring settings
+monitoring:
+  enabled: true
+  metrics:
+    fps: true
+    processing_time: true
+    memory_usage: true
+    cpu_usage: true
+    gpu_usage: true
+  visualization:
+    enabled: true
+    show_metrics: true
+    show_debug: true
+    show_timestamps: true
+
+# Hardware settings
+hardware:
+  use_gpu: true
+  gpu_id: 0
+  num_threads: 4
+  memory_limit: 8192  # MB
+  gpu:
+    enabled: true
+    device_id: 0
+    memory_limit: 2048  # MB
+  cpu:
+    threads: 4
+    affinity: [0, 1, 2, 3]
+  memory:
+    limit: 4096  # MB
+
+# Agent integration settings
+agent_integration:
+  enabled: true
+  perception_agent:
+    enabled: true
+    update_interval: 0.1  # seconds
+  emotion_agent:
+    enabled: true
+    update_interval: 0.2  # seconds
+  attention_agent:
+    enabled: true
+    update_interval: 0.1  # seconds
+  memory_agent:
+    enabled: true
+    update_interval: 1.0  # seconds
+  task_agent:
+    enabled: true
+    update_interval: 0.5  # seconds
+  social_agent:
+    enabled: true
+    update_interval: 0.2  # seconds
+
+# Feature flags
+features:
+  use_face_detection: true
+  use_object_detection: true
+  use_scene_classification: true
+  use_emotion_detection: true
+  use_eye_tracking: true
+  use_head_pose: true
+  use_blink_detection: true
+  use_agent_integration: true
+  use_visualization: true
+  microsaccades:
+    enabled: true
+    frequency: 2.0  # Hz
+    amplitude: 0.5  # degrees
+  smooth_pursuit:
+    enabled: true
+    max_velocity: 30  # degrees/s
+    acceleration: 100  # degrees/s^2
+  vergence:
+    enabled: true
+    max_angle: 10  # degrees
+    speed: 50  # degrees/s
+  saccades:
+    enabled: true
+    max_velocity: 500  # degrees/s
+    min_duration: 0.02  # seconds
+    max_duration: 0.1  # seconds 

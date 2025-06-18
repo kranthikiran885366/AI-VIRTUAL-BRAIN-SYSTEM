@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  emotion_agent:
+    build:
+      context: ../..
+      dockerfile: docker/emotion_agent/Dockerfile
+    environment:
+      - EMOTION_AGENT_API_HOST=0.0.0.0
+      - EMOTION_AGENT_API_PORT=8001
+      - EMOTION_AGENT_REDIS_HOST=redis
+      - EMOTION_AGENT_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    ports:
+      - "8001:8001"  # API
+      - "9091:9091"  # Prometheus metrics
+    volumes:
+      - emotion_data:/app/databases/emotion_db
+    depends_on:
+      - redis
+      - kafka
+    networks:
+      - virtual_brain_network
+
+  redis:
+    image: redis:6.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - virtual_brain_network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.0
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - virtual_brain_network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.0
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+    ports:
+      - "2181:2181"
+    networks:
+      - virtual_brain_network
+
+volumes:
+  emotion_data:
+  redis_data:
+
+networks:
+  virtual_brain_network:
+    name: virtual_brain_network 
