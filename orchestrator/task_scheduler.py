@@ -248,4 +248,32 @@ class TaskScheduler:
             "queue_size": self.task_queue.qsize(),
             "running_tasks": len(self.running_tasks),
             "total_tasks": len(self.tasks)
-        } 
+        }
+    
+    async def initialize(self):
+        """Initialize the task scheduler."""
+        logger.info("Initializing task scheduler...")
+        # Clear any stale tasks
+        self.tasks.clear()
+        self.running_tasks.clear()
+        logger.info("Task scheduler initialized")
+    
+    async def create_task(self, task: Dict[str, Any]) -> str:
+        """Create a new task (alias for schedule_task)."""
+        return await self.schedule_task(task)
+    
+    async def update_task_status(self, task_id: str, status: str, result: Any = None):
+        """Update task status."""
+        task = self.tasks.get(task_id)
+        if task:
+            task["status"] = TaskStatus(status) if status in TaskStatus.__members__ else TaskStatus.PENDING
+            task["result"] = result
+            task["updated_at"] = datetime.utcnow()
+    
+    async def process_tasks(self):
+        """Process tasks loop (wrapper for _process_tasks)."""
+        await self._process_tasks()
+    
+    async def shutdown(self):
+        """Shutdown the task scheduler."""
+        await self.stop() 

@@ -252,4 +252,24 @@ class HealthMonitor:
     async def update_component_status(self, component_id: str, status: HealthStatus):
         """Update health status of a specific component."""
         self.component_status[component_id] = status
-        logger.info(f"Updated component {component_id} status to {status}") 
+        logger.info(f"Updated component {component_id} status to {status}")
+    
+    async def initialize(self):
+        """Initialize the health monitor."""
+        logger.info("Initializing health monitor...")
+        # Initialize component status
+        self.component_status = {}
+        self.alerts = []
+        logger.info("Health monitor initialized")
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get health monitor status (alias for get_health_status)."""
+        return await self.get_health_status()
+    
+    async def monitor_health(self):
+        """Monitor health (wrapper for _monitor_loop)."""
+        await self._monitor_loop()
+    
+    async def shutdown(self):
+        """Shutdown the health monitor."""
+        await self.stop() 

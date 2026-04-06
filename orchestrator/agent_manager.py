@@ -155,4 +155,16 @@ class AgentManager:
         await asyncio.sleep(1)
         
         # Start agent
-        return await self.start_agent(agent_name) 
+        return await self.start_agent(agent_name)
+    
+    async def initialize(self):
+        """Initialize the agent manager."""
+        logger.info("Initializing agent manager...")
+        # Pre-load agent configurations
+        for agent_name, agent_config in self.config.get("agents", {}).items():
+            self.agent_status[agent_name] = "configured"
+        logger.info(f"Agent manager initialized with {len(self.agent_status)} agents configured")
+    
+    async def shutdown(self):
+        """Shutdown the agent manager."""
+        await self.stop() 

@@ -184,6 +184,29 @@ class DecisionEngine:
             "metrics": self.metrics,
             "decision_history_size": len(self.decision_history)
         }
+    
+    async def initialize(self):
+        """Initialize the decision engine."""
+        logger.info("Initializing decision engine...")
+        await self._load_models()
+        logger.info("Decision engine initialized")
+    
+    async def process_decisions(self):
+        """Process pending decisions in a loop."""
+        logger.info("Starting decision processing loop...")
+        while self.is_running:
+            try:
+                # Process any pending decisions
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in decision processing: {e}")
+                await asyncio.sleep(5)
+    
+    async def shutdown(self):
+        """Shutdown the decision engine."""
+        await self.stop()
 
 class ResourceAllocator:
     """Manages resource allocation for tasks."""
