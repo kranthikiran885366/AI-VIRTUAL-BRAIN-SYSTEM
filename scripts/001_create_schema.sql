@@ -17,6 +17,10 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
+drop policy if exists "profiles_select_own" on public.profiles;
+drop policy if exists "profiles_insert_own" on public.profiles;
+drop policy if exists "profiles_update_own" on public.profiles;
+
 create policy "profiles_select_own" on public.profiles for select using (auth.uid() = id);
 create policy "profiles_insert_own" on public.profiles for insert with check (auth.uid() = id);
 create policy "profiles_update_own" on public.profiles for update using (auth.uid() = id);
@@ -61,13 +65,18 @@ create table if not exists public.conversations (
 
 alter table public.conversations enable row level security;
 
+drop policy if exists "conversations_select_own" on public.conversations;
+drop policy if exists "conversations_insert_own" on public.conversations;
+drop policy if exists "conversations_update_own" on public.conversations;
+drop policy if exists "conversations_delete_own" on public.conversations;
+
 create policy "conversations_select_own" on public.conversations for select using (auth.uid() = user_id);
 create policy "conversations_insert_own" on public.conversations for insert with check (auth.uid() = user_id);
 create policy "conversations_update_own" on public.conversations for update using (auth.uid() = user_id);
 create policy "conversations_delete_own" on public.conversations for delete using (auth.uid() = user_id);
 
-create index idx_conversations_user_id on public.conversations(user_id);
-create index idx_conversations_created_at on public.conversations(created_at desc);
+create index if not exists idx_conversations_user_id on public.conversations(user_id);
+create index if not exists idx_conversations_created_at on public.conversations(created_at desc);
 
 -- Messages table
 create table if not exists public.messages (
@@ -85,13 +94,18 @@ create table if not exists public.messages (
 
 alter table public.messages enable row level security;
 
+drop policy if exists "messages_select_own" on public.messages;
+drop policy if exists "messages_insert_own" on public.messages;
+drop policy if exists "messages_update_own" on public.messages;
+drop policy if exists "messages_delete_own" on public.messages;
+
 create policy "messages_select_own" on public.messages for select using (auth.uid() = user_id);
 create policy "messages_insert_own" on public.messages for insert with check (auth.uid() = user_id);
 create policy "messages_update_own" on public.messages for update using (auth.uid() = user_id);
 create policy "messages_delete_own" on public.messages for delete using (auth.uid() = user_id);
 
-create index idx_messages_conversation_id on public.messages(conversation_id);
-create index idx_messages_created_at on public.messages(created_at);
+create index if not exists idx_messages_conversation_id on public.messages(conversation_id);
+create index if not exists idx_messages_created_at on public.messages(created_at);
 
 -- Agents table (brain agents configuration)
 create table if not exists public.agents (
@@ -134,7 +148,7 @@ create table if not exists public.memories (
   tags text[] default '{}',
   source text,
   context jsonb default '{}',
-  embedding vector(1536),
+  embedding_data jsonb,
   access_count int default 0,
   last_accessed_at timestamptz,
   created_at timestamptz default now(),
@@ -143,15 +157,20 @@ create table if not exists public.memories (
 
 alter table public.memories enable row level security;
 
+drop policy if exists "memories_select_own" on public.memories;
+drop policy if exists "memories_insert_own" on public.memories;
+drop policy if exists "memories_update_own" on public.memories;
+drop policy if exists "memories_delete_own" on public.memories;
+
 create policy "memories_select_own" on public.memories for select using (auth.uid() = user_id);
 create policy "memories_insert_own" on public.memories for insert with check (auth.uid() = user_id);
 create policy "memories_update_own" on public.memories for update using (auth.uid() = user_id);
 create policy "memories_delete_own" on public.memories for delete using (auth.uid() = user_id);
 
-create index idx_memories_user_id on public.memories(user_id);
-create index idx_memories_type on public.memories(type);
-create index idx_memories_importance on public.memories(importance desc);
-create index idx_memories_tags on public.memories using gin(tags);
+create index if not exists idx_memories_user_id on public.memories(user_id);
+create index if not exists idx_memories_type on public.memories(type);
+create index if not exists idx_memories_importance on public.memories(importance desc);
+create index if not exists idx_memories_tags on public.memories using gin(tags);
 
 -- Tasks table
 create table if not exists public.tasks (
@@ -165,7 +184,7 @@ create table if not exists public.tasks (
   completed_at timestamptz,
   tags text[] default '{}',
   dependencies uuid[] default '{}',
-  assigned_agent text references public.agents(name),
+  assigned_agent text,
   result jsonb,
   metadata jsonb default '{}',
   created_at timestamptz default now(),
@@ -174,20 +193,25 @@ create table if not exists public.tasks (
 
 alter table public.tasks enable row level security;
 
+drop policy if exists "tasks_select_own" on public.tasks;
+drop policy if exists "tasks_insert_own" on public.tasks;
+drop policy if exists "tasks_update_own" on public.tasks;
+drop policy if exists "tasks_delete_own" on public.tasks;
+
 create policy "tasks_select_own" on public.tasks for select using (auth.uid() = user_id);
 create policy "tasks_insert_own" on public.tasks for insert with check (auth.uid() = user_id);
 create policy "tasks_update_own" on public.tasks for update using (auth.uid() = user_id);
 create policy "tasks_delete_own" on public.tasks for delete using (auth.uid() = user_id);
 
-create index idx_tasks_user_id on public.tasks(user_id);
-create index idx_tasks_status on public.tasks(status);
-create index idx_tasks_priority on public.tasks(priority desc);
+create index if not exists idx_tasks_user_id on public.tasks(user_id);
+create index if not exists idx_tasks_status on public.tasks(status);
+create index if not exists idx_tasks_priority on public.tasks(priority desc);
 
 -- Agent activity log
 create table if not exists public.agent_activity (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid not null references public.profiles(id) on delete cascade,
-  agent_name text not null references public.agents(name),
+  agent_name text not null,
   action text not null,
   input jsonb,
   output jsonb,
@@ -200,12 +224,15 @@ create table if not exists public.agent_activity (
 
 alter table public.agent_activity enable row level security;
 
+drop policy if exists "agent_activity_select_own" on public.agent_activity;
+drop policy if exists "agent_activity_insert_own" on public.agent_activity;
+
 create policy "agent_activity_select_own" on public.agent_activity for select using (auth.uid() = user_id);
 create policy "agent_activity_insert_own" on public.agent_activity for insert with check (auth.uid() = user_id);
 
-create index idx_agent_activity_user_id on public.agent_activity(user_id);
-create index idx_agent_activity_agent_name on public.agent_activity(agent_name);
-create index idx_agent_activity_created_at on public.agent_activity(created_at desc);
+create index if not exists idx_agent_activity_user_id on public.agent_activity(user_id);
+create index if not exists idx_agent_activity_agent_name on public.agent_activity(agent_name);
+create index if not exists idx_agent_activity_created_at on public.agent_activity(created_at desc);
 
 -- User settings
 create table if not exists public.user_settings (
@@ -215,7 +242,7 @@ create table if not exists public.user_settings (
   notifications_enabled boolean default true,
   voice_enabled boolean default false,
   default_model text default 'openai/gpt-5',
-  active_agents text[] default '{"memory_agent", "emotion_agent", "task_agent", "learning_agent", "creativity_agent", "language_agent"}',
+  active_agents text[] default ARRAY['memory_agent', 'emotion_agent', 'task_agent', 'learning_agent', 'creativity_agent', 'language_agent'],
   custom_instructions text,
   metadata jsonb default '{}',
   created_at timestamptz default now(),
@@ -223,6 +250,10 @@ create table if not exists public.user_settings (
 );
 
 alter table public.user_settings enable row level security;
+
+drop policy if exists "user_settings_select_own" on public.user_settings;
+drop policy if exists "user_settings_insert_own" on public.user_settings;
+drop policy if exists "user_settings_update_own" on public.user_settings;
 
 create policy "user_settings_select_own" on public.user_settings for select using (auth.uid() = id);
 create policy "user_settings_insert_own" on public.user_settings for insert with check (auth.uid() = id);
@@ -261,20 +292,26 @@ end;
 $$;
 
 -- Apply timestamp triggers
+drop trigger if exists update_profiles_updated_at on public.profiles;
 create trigger update_profiles_updated_at before update on public.profiles
   for each row execute function public.update_updated_at();
 
+drop trigger if exists update_conversations_updated_at on public.conversations;
 create trigger update_conversations_updated_at before update on public.conversations
   for each row execute function public.update_updated_at();
 
+drop trigger if exists update_agents_updated_at on public.agents;
 create trigger update_agents_updated_at before update on public.agents
   for each row execute function public.update_updated_at();
 
+drop trigger if exists update_memories_updated_at on public.memories;
 create trigger update_memories_updated_at before update on public.memories
   for each row execute function public.update_updated_at();
 
+drop trigger if exists update_tasks_updated_at on public.tasks;
 create trigger update_tasks_updated_at before update on public.tasks
   for each row execute function public.update_updated_at();
 
+drop trigger if exists update_user_settings_updated_at on public.user_settings;
 create trigger update_user_settings_updated_at before update on public.user_settings
   for each row execute function public.update_updated_at();
