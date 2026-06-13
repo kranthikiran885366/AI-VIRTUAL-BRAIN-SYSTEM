@@ -1,8 +1,19 @@
-import { brainService, AGENT_REGISTRY } from "@/lib/brain-service"
-import { createClient } from "@/lib/supabase/server"
+import { brainService, AGENT_REGISTRY, initBrainService } from "@/lib/brain-service"
+import {
+  getAllAgents,
+  getOrCreateUser,
+  searchMemories,
+  createMemory,
+  createTask,
+  dbAll,
+  logAgentActivity,
+} from "@/lib/db-utils"
+
+// Initialize brain service
+initBrainService()
 
 /**
- * Brain API - Direct interface to the Python Virtual Brain backend
+ * Brain API - Direct interface to the AI Virtual Brain backend
  * 
  * Provides endpoints for:
  * - System status
@@ -16,25 +27,29 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
     const action = searchParams.get("action") || "status"
+    const userId = searchParams.get("userId")
 
     switch (action) {
       case "status": {
         const status = await brainService.getSystemStatus()
-        const activityStats = await brainService.getActivityStats()
+        const agents = getAllAgents(true)
         
         return Response.json({
           ...status,
-          activityStats,
-          agents: Object.entries(AGENT_REGISTRY).map(([name, info]) => ({
-            name,
-            ...info,
-            activity: activityStats[name] || 0,
+          agents: agents.map((a: any) => ({
+            id: a.id,
+            name: a.name,
+            display_name: a.display_name,
+            is_active: a.is_active,
+            category: a.category,
+            icon: a.icon,
+            color: a.color,
           })),
         })
       }
 
       case "agents": {
-        const agents = await brainService.listAgents()
+        const agents = getAllAgents(true)
         return Response.json({ agents })
       }
 
@@ -43,51 +58,39 @@ export async function GET(req: Request) {
         if (!agentName) {
           return Response.json({ error: "Agent name required" }, { status: 400 })
         }
-        const status = await brainService.getAgentStatus(agentName)
-        return Response.json(status)
-      }
-
-      case "task-status": {
-        const taskId = searchParams.get("taskId")
-        if (!taskId) {
-          return Response.json({ error: "Task ID required" }, { status: 400 })
-        }
-        const status = await brainService.getTaskStatus(taskId)
-        return Response.json(status)
-      }
-
-      case "messages": {
-        const topic = searchParams.get("topic") || "general"
-        const limit = parseInt(searchParams.get("limit") || "50", 10)
-        const messages = await brainService.getMessages(topic, limit)
-        return Response.json({ messages, topic })
+        const agent = agents.find((a: any) => a.name === agentName)
+        return Response.json({ agent: agent || null, status: agent ? "active" : "inactive" })
       }
 
       case "memories": {
-        const supabase = await createClient()
-        const { data: { user } } = await supabase.auth.getUser()
-        
-        if (!user) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 })
+        if (!userId) {
+          return Response.json({ error: "userId required" }, { status: 400 })
         }
 
         const query = searchParams.get("query") || ""
         const limit = parseInt(searchParams.get("limit") || "20", 10)
         
-        const memories = await brainService.recallMemories(user.id, query, limit)
+        const memories = await brainService.recallMemories(userId, query, limit)
         return Response.json({ memories })
       }
 
       case "activity": {
-        const stats = await brainService.getActivityStats()
-        return Response.json({ stats })
+        if (!userId) {
+          return Response.json({ error: "userId required" }, { status: 400 })
+        }
+        
+        const activity = dbAll(
+          `SELECT * FROM agent_activity WHERE user_id = ? ORDER BY created_at DESC LIMIT 100`,
+          [userId]
+        )
+        return Response.json({ activity })
       }
 
       default:
         return Response.json({ error: "Unknown action" }, { status: 400 })
     }
   } catch (error) {
-    console.error("Brain API error:", error)
+    console.error("[v0] Brain API error:", error)
     return Response.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -99,98 +102,15 @@ export async function POST(req: Request) {
   try {
     const body = await req.json()
     const { action, ...params } = body
+    const { userId, agentName } = params
 
-    // Auth check for certain actions
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    // Get or create user if provided
+    let user = null
+    if (userId) {
+      user = getOrCreateUser(userId, "user@example.com", "AI User")
+    }
 
     switch (action) {
-      case "execute-agent": {
-        const { agentName, request } = params
-        if (!agentName || !request) {
-          return Response.json(
-            { error: "Agent name and request required" },
-            { status: 400 }
-          )
-        }
-        
-        const result = await brainService.executeAgent(agentName, request)
-        
-        // Log activity if user is authenticated
-        if (user) {
-          await brainService.logActivity(
-            user.id,
-            params.conversationId || null,
-            agentName,
-            "direct_execution",
-            request,
-            result.result,
-            result.status === "success",
-            result.latencyMs || 0,
-            result.tokensUsed
-          )
-        }
-        
-        return Response.json(result)
-      }
-
-      case "create-task": {
-        const { agentName, request, priority } = params
-        if (!agentName || !request) {
-          return Response.json(
-            { error: "Agent name and request required" },
-            { status: 400 }
-          )
-        }
-        
-        const result = await brainService.createTask({
-          agentName,
-          request,
-          priority: priority || "medium",
-        })
-        
-        return Response.json(result)
-      }
-
-      case "store-memory": {
-        if (!user) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 })
-        }
-
-        const { content, memoryType, importance, tags } = params
-        if (!content) {
-          return Response.json({ error: "Content required" }, { status: 400 })
-        }
-
-        const success = await brainService.storeMemory(
-          user.id,
-          content,
-          memoryType || "short_term",
-          importance || 0.5,
-          tags || []
-        )
-
-        return Response.json({ success })
-      }
-
-      case "publish-message": {
-        const { topic, message } = params
-        if (!topic || !message) {
-          return Response.json(
-            { error: "Topic and message required" },
-            { status: 400 }
-          )
-        }
-
-        const success = await brainService.publishMessage(topic, {
-          ...message,
-          userId: user?.id,
-          timestamp: new Date().toISOString(),
-        })
-
-        return Response.json({ success })
-      }
-
       case "route-request": {
         const { content } = params
         if (!content) {
@@ -201,14 +121,73 @@ export async function POST(req: Request) {
         return Response.json(routing)
       }
 
+      case "store-memory": {
+        if (!user) {
+          return Response.json({ error: "User not found" }, { status: 400 })
+        }
+
+        const { content, memory_type = "general", importance = 0.5, tags = [] } = params
+        if (!content) {
+          return Response.json({ error: "Content required" }, { status: 400 })
+        }
+
+        const memory = await brainService.storeMemory(
+          user.id,
+          content,
+          memory_type,
+          importance,
+          tags
+        )
+
+        return Response.json({ success: !!memory, memory })
+      }
+
+      case "create-task": {
+        if (!user) {
+          return Response.json({ error: "User not found" }, { status: 400 })
+        }
+
+        const { title, description, priority = "medium", due_date, tags = [] } = params
+        if (!title) {
+          return Response.json({ error: "Title required" }, { status: 400 })
+        }
+
+        const task = createTask(
+          user.id,
+          title,
+          description,
+          priority,
+          due_date,
+          tags
+        )
+
+        return Response.json({ success: !!task, task })
+      }
+
+      case "recall-memories": {
+        if (!user) {
+          return Response.json({ error: "User not found" }, { status: 400 })
+        }
+
+        const { query, limit = 10 } = params
+        if (!query) {
+          return Response.json({ error: "Query required" }, { status: 400 })
+        }
+
+        const memories = await brainService.recallMemories(user.id, query, limit)
+        return Response.json({ memories })
+      }
+
       default:
         return Response.json({ error: "Unknown action" }, { status: 400 })
     }
   } catch (error) {
-    console.error("Brain API error:", error)
+    console.error("[v0] Brain API error:", error)
     return Response.json(
       { error: "Internal server error" },
       { status: 500 }
     )
   }
 }
+
+const agents = getAllAgents(true)

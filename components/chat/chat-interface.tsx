@@ -65,11 +65,13 @@ const AGENT_COLORS: Record<string, string> = {
 
 interface ChatInterfaceProps {
   conversationId: string | null
+  userId: string
   onConversationCreated?: (id: string) => void
 }
 
 export function ChatInterface({
   conversationId,
+  userId,
   onConversationCreated,
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -101,12 +103,15 @@ export function ChatInterface({
         body: {
           messages,
           conversationId: id,
+          userId,
           model: "openai/gpt-4o",
         },
       }),
     }),
     onFinish: async (message) => {
-      mutate("/api/conversations")
+      if (userId) {
+        mutate(`/api/conversations?userId=${userId}`)
+      }
       setRoutingInfo(null)
     },
   })
@@ -117,17 +122,17 @@ export function ChatInterface({
       const response = await fetch("/api/brain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "route-request", content }),
+        body: JSON.stringify({ action: "route-request", content, userId }),
       })
       const routing = await response.json()
       setRoutingInfo(routing)
       setActiveAgent(routing.selectedAgent)
       return routing
     } catch (error) {
-      console.error("Routing error:", error)
+      console.error("[v0] Routing error:", error)
       return null
     }
-  }, [])
+  }, [userId])
 
   // Load existing messages when conversation changes
   useEffect(() => {
@@ -164,6 +169,7 @@ export function ChatInterface({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            userId,
             title: content.slice(0, 50) + (content.length > 50 ? "..." : ""),
           }),
         })
@@ -171,7 +177,7 @@ export function ChatInterface({
         currentConversationId = newConv.id
         onConversationCreated?.(newConv.id)
       } catch (error) {
-        console.error("Failed to create conversation:", error)
+        console.error("[v0] Failed to create conversation:", error)
         return
       }
     }
@@ -182,12 +188,13 @@ export function ChatInterface({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          userId,
           role: "user",
           content,
         }),
       })
     } catch (error) {
-      console.error("Failed to save user message:", error)
+      console.error("[v0] Failed to save user message:", error)
     }
 
     // Send to AI

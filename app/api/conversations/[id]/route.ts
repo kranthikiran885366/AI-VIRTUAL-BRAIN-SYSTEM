@@ -1,58 +1,44 @@
-import { createClient } from "@/lib/supabase/server"
-import { redis, CACHE_KEYS, CACHE_TTL, cacheGet, cacheSet, cacheDelete } from "@/lib/redis"
 import { NextResponse } from "next/server"
+import {
+  getConversation,
+  updateConversation,
+  dbAll,
+} from "@/lib/db-utils"
+import { redis, CACHE_KEYS, CACHE_TTL } from "@/lib/cache"
 
 export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const { id } = params
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
     }
 
-    // Try cache first
-    const cacheKey = CACHE_KEYS.conversation(id)
-    const cached = await cacheGet<unknown>(cacheKey)
-    
-    if (cached) {
-      return NextResponse.json(cached)
-    }
+    const conversation = getConversation(id)
 
-    // Fetch conversation with messages
-    const { data: conversation, error: convError } = await supabase
-      .from("conversations")
-      .select("*")
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .single()
-
-    if (convError || !conversation) {
+    if (!conversation) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
     }
 
-    const { data: messages, error: msgError } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("conversation_id", id)
-      .order("created_at", { ascending: true })
+    // Fetch messages for this conversation
+    const messages = dbAll(
+      `SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`,
+      [id]
+    )
 
-    if (msgError) {
-      throw msgError
-    }
-
-    const result = { ...conversation, messages: messages || [] }
+    const result = { ...conversation, messages }
 
     // Cache the result
-    await cacheSet(cacheKey, result, CACHE_TTL.conversation)
+    await redis.set(CACHE_KEYS.conversationMessages(id), JSON.stringify(result), {
+      ex: CACHE_TTL.conversationMessages,
+    })
 
     return NextResponse.json(result)
   } catch (error) {
-    console.error("Error fetching conversation:", error)
+    console.error("[v0] Error fetching conversation:", error)
     return NextResponse.json(
       { error: "Failed to fetch conversation" },
       { status: 500 }
@@ -60,47 +46,43 @@ export async function GET(
   }
 }
 
-export async function PATCH(
+export async function PUT(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
+    const { id } = params
     const body = await req.json()
-    const { title, is_archived, system_prompt, model } = body
 
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
-    if (title !== undefined) updateData.title = title
-    if (is_archived !== undefined) updateData.is_archived = is_archived
-    if (system_prompt !== undefined) updateData.system_prompt = system_prompt
-    if (model !== undefined) updateData.model = model
-
-    const { data, error } = await supabase
-      .from("conversations")
-      .update(updateData)
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .select()
-      .single()
-
-    if (error) {
-      throw error
+    if (!id) {
+      return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
     }
+
+    const conversation = getConversation(id)
+    if (!conversation) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
+    }
+
+    // Update allowed fields only
+    const updates: Record<string, any> = {}
+    if (body.title) updates.title = body.title
+    if (body.system_prompt !== undefined) updates.system_prompt = body.system_prompt
+    if (body.is_archived !== undefined) updates.is_archived = body.is_archived ? 1 : 0
+    if (body.model) updates.model = body.model
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json(conversation)
+    }
+
+    const updated = updateConversation(id, updates)
 
     // Invalidate caches
-    await cacheDelete(CACHE_KEYS.conversation(id))
-    await redis.del(CACHE_KEYS.userConversations(user.id))
+    await redis.del(CACHE_KEYS.conversationMessages(id))
+    await redis.del(CACHE_KEYS.userConversations(conversation.user_id))
 
-    return NextResponse.json(data)
+    return NextResponse.json(updated)
   } catch (error) {
-    console.error("Error updating conversation:", error)
+    console.error("[v0] Error updating conversation:", error)
     return NextResponse.json(
       { error: "Failed to update conversation" },
       { status: 500 }
@@ -110,34 +92,30 @@ export async function PATCH(
 
 export async function DELETE(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const { id } = params
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
     }
 
-    const { error } = await supabase
-      .from("conversations")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id)
-
-    if (error) {
-      throw error
+    const conversation = getConversation(id)
+    if (!conversation) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
     }
+
+    // Soft delete by archiving
+    updateConversation(id, { is_archived: 1 })
 
     // Invalidate caches
-    await cacheDelete(CACHE_KEYS.conversation(id))
-    await redis.del(CACHE_KEYS.userConversations(user.id))
+    await redis.del(CACHE_KEYS.conversationMessages(id))
+    await redis.del(CACHE_KEYS.userConversations(conversation.user_id))
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Error deleting conversation:", error)
+    console.error("[v0] Error deleting conversation:", error)
     return NextResponse.json(
       { error: "Failed to delete conversation" },
       { status: 500 }

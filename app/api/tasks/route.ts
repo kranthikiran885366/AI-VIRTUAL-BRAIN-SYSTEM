@@ -1,39 +1,29 @@
-import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import {
+  getOrCreateUser,
+  getUserTasks,
+  createTask,
+  updateTask,
+  generateId,
+} from "@/lib/db-utils"
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     const { searchParams } = new URL(req.url)
+    const userId = searchParams.get("userId")
     const status = searchParams.get("status")
     const limit = parseInt(searchParams.get("limit") || "50")
 
-    let query = supabase
-      .from("tasks")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(limit)
-
-    if (status) {
-      query = query.eq("status", status)
+    if (!userId) {
+      return NextResponse.json({ error: "Missing userId parameter" }, { status: 400 })
     }
 
-    const { data, error } = await query
+    // Fetch user tasks
+    const tasks = getUserTasks(userId, status || undefined, limit)
 
-    if (error) {
-      throw error
-    }
-
-    return NextResponse.json(data)
+    return NextResponse.json(tasks)
   } catch (error) {
-    console.error("Error fetching tasks:", error)
+    console.error("[v0] Error fetching tasks:", error)
     return NextResponse.json(
       { error: "Failed to fetch tasks" },
       { status: 500 }
@@ -43,37 +33,49 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     const body = await req.json()
-    const { title, description, priority = "medium", due_date, tags = [], metadata = {} } = body
+    const {
+      userId,
+      title,
+      description,
+      priority = "medium",
+      due_date,
+      tags = [],
+      source_conversation_id,
+    } = body
 
-    const { data, error } = await supabase
-      .from("tasks")
-      .insert({
-        user_id: user.id,
-        title,
-        description,
-        priority,
-        due_date,
-        tags,
-        metadata,
-      })
-      .select()
-      .single()
-
-    if (error) {
-      throw error
+    if (!userId) {
+      return NextResponse.json({ error: "Missing userId" }, { status: 400 })
     }
 
-    return NextResponse.json(data)
+    if (!title) {
+      return NextResponse.json({ error: "Missing task title" }, { status: 400 })
+    }
+
+    // Ensure user exists
+    const user = getOrCreateUser(userId, "user@example.com", "AI User")
+    if (!user) {
+      return NextResponse.json({ error: "Failed to create user" }, { status: 500 })
+    }
+
+    // Create task
+    const task = createTask(
+      userId,
+      title,
+      description,
+      priority,
+      due_date,
+      tags,
+      source_conversation_id
+    )
+
+    if (!task) {
+      return NextResponse.json({ error: "Failed to create task" }, { status: 500 })
+    }
+
+    return NextResponse.json(task)
   } catch (error) {
-    console.error("Error creating task:", error)
+    console.error("[v0] Error creating task:", error)
     return NextResponse.json(
       { error: "Failed to create task" },
       { status: 500 }

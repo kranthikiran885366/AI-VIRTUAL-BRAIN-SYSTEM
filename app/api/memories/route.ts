@@ -1,39 +1,35 @@
-import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import {
+  getOrCreateUser,
+  getUserMemories,
+  createMemory,
+  searchMemories,
+} from "@/lib/db-utils"
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     const { searchParams } = new URL(req.url)
+    const userId = searchParams.get("userId")
     const type = searchParams.get("type")
+    const query = searchParams.get("q")
     const limit = parseInt(searchParams.get("limit") || "50")
 
-    let query = supabase
-      .from("memories")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(limit)
-
-    if (type) {
-      query = query.eq("memory_type", type)
+    if (!userId) {
+      return NextResponse.json({ error: "Missing userId parameter" }, { status: 400 })
     }
 
-    const { data, error } = await query
-
-    if (error) {
-      throw error
+    let memories
+    if (query) {
+      // Search memories
+      memories = searchMemories(userId, query, limit)
+    } else {
+      // Get user memories by type
+      memories = getUserMemories(userId, type || undefined, limit)
     }
 
-    return NextResponse.json(data)
+    return NextResponse.json(memories)
   } catch (error) {
-    console.error("Error fetching memories:", error)
+    console.error("[v0] Error fetching memories:", error)
     return NextResponse.json(
       { error: "Failed to fetch memories" },
       { status: 500 }
@@ -43,36 +39,47 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     const body = await req.json()
-    const { content, memory_type = "general", importance = 0.5, tags = [], metadata = {} } = body
+    const {
+      userId,
+      content,
+      memory_type = "general",
+      importance = 0.5,
+      tags = [],
+      source_conversation_id,
+    } = body
 
-    const { data, error } = await supabase
-      .from("memories")
-      .insert({
-        user_id: user.id,
-        content,
-        memory_type,
-        importance,
-        tags,
-        metadata,
-      })
-      .select()
-      .single()
-
-    if (error) {
-      throw error
+    if (!userId) {
+      return NextResponse.json({ error: "Missing userId" }, { status: 400 })
     }
 
-    return NextResponse.json(data)
+    if (!content) {
+      return NextResponse.json({ error: "Missing content" }, { status: 400 })
+    }
+
+    // Ensure user exists
+    const user = getOrCreateUser(userId, "user@example.com", "AI User")
+    if (!user) {
+      return NextResponse.json({ error: "Failed to create user" }, { status: 500 })
+    }
+
+    // Create memory
+    const memory = createMemory(
+      userId,
+      content,
+      memory_type,
+      importance,
+      tags,
+      source_conversation_id
+    )
+
+    if (!memory) {
+      return NextResponse.json({ error: "Failed to create memory" }, { status: 500 })
+    }
+
+    return NextResponse.json(memory)
   } catch (error) {
-    console.error("Error creating memory:", error)
+    console.error("[v0] Error creating memory:", error)
     return NextResponse.json(
       { error: "Failed to create memory" },
       { status: 500 }

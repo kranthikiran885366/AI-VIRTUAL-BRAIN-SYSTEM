@@ -1,66 +1,86 @@
-import { createClient } from "@/lib/supabase/server"
-import { redis, CACHE_KEYS, cacheDelete } from "@/lib/redis"
 import { NextResponse } from "next/server"
+import {
+  getConversation,
+  createMessage,
+  updateConversation,
+  dbAll,
+} from "@/lib/db-utils"
+import { redis, CACHE_KEYS } from "@/lib/cache"
 
-export async function POST(
+export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id: conversationId } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const { id: conversationId } = params
+
+    if (!conversationId) {
+      return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
     }
 
-    const body = await req.json()
-    const { role, content, parts, agent_used, metadata } = body
-
-    // Verify user owns this conversation
-    const { data: conversation } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("id", conversationId)
-      .eq("user_id", user.id)
-      .single()
-
+    const conversation = getConversation(conversationId)
     if (!conversation) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
     }
 
-    const { data, error } = await supabase
-      .from("messages")
-      .insert({
-        conversation_id: conversationId,
-        user_id: user.id,
-        role,
-        content,
-        parts,
-        agent_used,
-        metadata,
-      })
-      .select()
-      .single()
+    const messages = dbAll(
+      `SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`,
+      [conversationId]
+    )
 
-    if (error) {
-      throw error
+    return NextResponse.json(messages)
+  } catch (error) {
+    console.error("[v0] Error fetching messages:", error)
+    return NextResponse.json(
+      { error: "Failed to fetch messages" },
+      { status: 500 }
+    )
+  }
+}
+
+export async function POST(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { id: conversationId } = params
+    const body = await req.json()
+    const { userId, role, content } = body
+
+    if (!conversationId) {
+      return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
+    }
+
+    if (!userId || !role || !content) {
+      return NextResponse.json(
+        { error: "Missing required fields: userId, role, content" },
+        { status: 400 }
+      )
+    }
+
+    // Verify conversation exists
+    const conversation = getConversation(conversationId)
+    if (!conversation) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
+    }
+
+    // Create message
+    const message = createMessage(conversationId, userId, role as any, content)
+
+    if (!message) {
+      return NextResponse.json({ error: "Failed to create message" }, { status: 500 })
     }
 
     // Update conversation timestamp
-    await supabase
-      .from("conversations")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", conversationId)
+    updateConversation(conversationId, { updated_at: new Date().toISOString() })
 
-    // Invalidate cache
-    await cacheDelete(CACHE_KEYS.conversation(conversationId))
-    await redis.del(CACHE_KEYS.userConversations(user.id))
+    // Invalidate caches
+    await redis.del(CACHE_KEYS.conversationMessages(conversationId))
+    await redis.del(CACHE_KEYS.userConversations(conversation.user_id))
 
-    return NextResponse.json(data)
+    return NextResponse.json(message)
   } catch (error) {
-    console.error("Error creating message:", error)
+    console.error("[v0] Error creating message:", error)
     return NextResponse.json(
       { error: "Failed to create message" },
       { status: 500 }

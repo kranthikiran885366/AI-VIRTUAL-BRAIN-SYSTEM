@@ -1,8 +1,23 @@
 import { streamText, convertToModelMessages, tool, Output } from "ai"
 import { z } from "zod"
-import { createClient } from "@/lib/supabase/server"
-import { redis, CACHE_KEYS, CACHE_TTL } from "@/lib/redis"
-import { brainService, AGENT_REGISTRY, type AgentName } from "@/lib/brain-service"
+import { redis, CACHE_KEYS, CACHE_TTL } from "@/lib/cache"
+import { brainService, AGENT_REGISTRY, type AgentName, initBrainService } from "@/lib/brain-service"
+import { 
+  getOrCreateUser, 
+  createMessage,
+  getConversation,
+  updateConversation,
+  createMemory,
+  createTask,
+  createAgent,
+  logAgentActivity,
+  generateId,
+  getUserMemories,
+  searchMemories,
+} from "@/lib/db-utils"
+
+// Initialize brain service
+initBrainService()
 
 /**
  * Advanced AI Virtual Brain Chat API
@@ -431,50 +446,59 @@ export async function POST(req: Request) {
   const startTime = Date.now()
   
   try {
-    const { messages, conversationId, model = "openai/gpt-4o" } = await req.json()
+    const { messages, conversationId, userId, model = "openai/gpt-4o" } = await req.json()
     
-    // Get user from Supabase auth
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    // Get or create user (using provided userId or generate one)
+    const currentUserId = userId || generateId()
+    const user = getOrCreateUser(currentUserId, "user@example.com", "AI User")
     
+    if (!user) {
+      return new Response(
+        JSON.stringify({ error: "Failed to authenticate user" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      )
+    }
+
     // Extract the last user message content
     const lastMessage = messages[messages.length - 1]
     const userContent = lastMessage?.parts?.find((p: { type: string }) => p.type === "text")?.text || 
                        lastMessage?.content || ""
     
-    // Route request through brain service to determine best agent
-    const routing = await brainService.routeRequest(userContent)
-    const agentType = routing.selectedAgent.replace("_agent", "") as string
-    
-    // Get the appropriate system prompt
-    let systemPrompt = AGENT_SYSTEM_PROMPTS[routing.selectedAgent] || 
-                       AGENT_SYSTEM_PROMPTS[agentType] ||
-                       AGENT_SYSTEM_PROMPTS.orchestrator
-    
-    // Add routing context to the prompt
-    systemPrompt += `\n\n[ROUTING INFO]
-Selected Agent: ${routing.selectedAgent}
-Confidence: ${(routing.confidence * 100).toFixed(0)}%
-Reasoning: ${routing.reasoning}
-
-You are now responding as the ${AGENT_REGISTRY[routing.selectedAgent as AgentName]?.displayName || "Orchestrator"}.`
-
-    // Load recent memories if user is authenticated
-    let memoryContext = ""
-    if (user) {
-      try {
-        const memories = await brainService.recallMemories(user.id, userContent, 5)
-        if (memories.length > 0) {
-          memoryContext = `\n\n[RELEVANT MEMORIES]
-${memories.map(m => `- ${m.content} (${m.memoryType}, importance: ${m.importance})`).join("\n")}`
-          systemPrompt += memoryContext
-        }
-      } catch (memoryError) {
-        console.error("Memory recall error:", memoryError)
-      }
+    if (!userContent) {
+      return new Response(
+        JSON.stringify({ error: "Empty user message" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      )
     }
 
-    // Build conversation context
+    // Route request through brain service to determine best agent
+    const routing = await brainService.routeRequest(userContent)
+    
+    // Get the appropriate agent
+    const agentInfo = AGENT_REGISTRY[routing.selectedAgent as AgentName]
+    let systemPrompt = `You are ${agentInfo?.displayName || "ARIA (Orchestrator)"}.
+
+${agentInfo?.description || "Central orchestrator coordinating all agents"}
+
+[ROUTING INFO]
+Agent: ${routing.selectedAgent}
+Confidence: ${(routing.confidence * 100).toFixed(0)}%
+Reasoning: ${routing.reasoning}`
+
+    // Load relevant memories
+    let memoryContext = ""
+    try {
+      const memories = await brainService.recallMemories(user.id, userContent, 5)
+      if (memories.length > 0) {
+        memoryContext = `\n\n[RELEVANT MEMORIES]
+${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: ${m.importance})`).join("\n")}`
+        systemPrompt += memoryContext
+      }
+    } catch (memoryError) {
+      console.error("[v0] Memory recall error:", memoryError)
+    }
+
+    // Prepare conversation context (last 15 messages)
     const conversationContext = messages.slice(-15)
 
     // Stream the response using AI SDK
@@ -488,28 +512,34 @@ ${memories.map(m => `- ${m.content} (${m.memoryType}, importance: ${m.importance
       onFinish: async ({ text, usage, steps }) => {
         const latency = Date.now() - startTime
         
-        // Save to database if user is authenticated
-        if (user && conversationId) {
-          try {
+        try {
+          // Create or use existing conversation
+          let convId = conversationId
+          if (!convId && user) {
+            const newConv = await createConversation(
+              user.id,
+              userContent.slice(0, 50),
+              model
+            )
+            convId = newConv?.id
+          }
+
+          if (convId && user) {
+            // Save the user message
+            createMessage(convId, user.id, "user", userContent)
+
             // Save the assistant message
-            await supabase.from("messages").insert({
-              conversation_id: conversationId,
-              user_id: user.id,
-              role: "assistant",
-              content: text,
-              agent_used: routing.selectedAgent,
-              tokens_used: usage?.totalTokens,
-              latency_ms: latency,
-              metadata: {
-                routing,
-                stepsCount: steps?.length || 0,
-              },
-            })
+            createMessage(
+              convId,
+              user.id,
+              "assistant",
+              text,
+            )
 
             // Log agent activity
             await brainService.logActivity(
               user.id,
-              conversationId,
+              convId,
               routing.selectedAgent,
               "chat_response",
               { userContent: userContent.slice(0, 200), routing },
@@ -519,32 +549,34 @@ ${memories.map(m => `- ${m.content} (${m.memoryType}, importance: ${m.importance
               usage?.totalTokens
             )
 
-            // Update conversation
-            await supabase
-              .from("conversations")
-              .update({ updated_at: new Date().toISOString() })
-              .eq("id", conversationId)
+            // Update conversation timestamp
+            if (convId) {
+              updateConversation(convId, { 
+                updated_at: new Date().toISOString()
+              })
+            }
 
             // Cache recent messages
             await redis.set(
-              CACHE_KEYS.recentMessages(conversationId),
+              CACHE_KEYS.recentMessages(convId),
               JSON.stringify(messages.slice(-20)),
               { ex: CACHE_TTL.recentMessages }
             )
 
-            // Store important information as memory
-            if (routing.confidence > 0.8) {
+            // Store important information as memory if confidence is high
+            if (routing.confidence > 0.8 && routing.selectedAgent !== "orchestrator_agent") {
               await brainService.storeMemory(
                 user.id,
-                `User asked about: ${userContent.slice(0, 100)}`,
-                "short_term",
-                0.5,
-                [routing.selectedAgent, "conversation"]
+                `User asked: ${userContent.slice(0, 100)}`,
+                "interaction",
+                routing.confidence,
+                [routing.selectedAgent, "conversation"],
+                convId
               )
             }
-          } catch (dbError) {
-            console.error("Database error:", dbError)
           }
+        } catch (dbError) {
+          console.error("[v0] Database error:", dbError)
         }
       },
     })
@@ -553,7 +585,7 @@ ${memories.map(m => `- ${m.content} (${m.memoryType}, importance: ${m.importance
       sendReasoning: true,
     })
   } catch (error) {
-    console.error("Chat API error:", error)
+    console.error("[v0] Chat API error:", error)
     return new Response(
       JSON.stringify({ 
         error: "Failed to process chat request",
@@ -563,6 +595,9 @@ ${memories.map(m => `- ${m.content} (${m.memoryType}, importance: ${m.importance
     )
   }
 }
+
+// Import conversation creation from db-utils
+const { createConversation } = require("@/lib/db-utils")
 
 // GET endpoint to get agent info
 export async function GET() {
