@@ -1,18 +1,15 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
 import { ChatSidebar } from "./chat-sidebar"
 import { ChatInterface } from "./chat-interface"
-import { AuthDialog } from "@/components/auth/auth-dialog"
-import { createClient } from "@/lib/supabase/client"
 import { Menu, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { User } from "@supabase/supabase-js"
+import { generateId } from "@/lib/db-utils"
 
 interface ChatAppProps {
-  user: User | null
+  user: any | null
   profile: {
     id: string
     email?: string
@@ -23,10 +20,16 @@ interface ChatAppProps {
 
 export function ChatApp({ user, profile }: ChatAppProps) {
   const [conversationId, setConversationId] = useState<string | null>(null)
-  const [showAuthDialog, setShowAuthDialog] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const router = useRouter()
-  const supabase = createClient()
+  const [userId, setUserId] = useState<string>("")
+
+  // Generate a user ID if not authenticated
+  useEffect(() => {
+    if (!userId) {
+      const id = user?.id || generateId()
+      setUserId(id)
+    }
+  }, [userId, user])
 
   const handleNewChat = () => {
     setConversationId(null)
@@ -40,13 +43,10 @@ export function ChatApp({ user, profile }: ChatAppProps) {
     setConversationId(id)
   }
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.refresh()
-  }
-
-  const handleAuthRequired = () => {
-    setShowAuthDialog(true)
+  const handleSignOut = () => {
+    // Clear user ID and reset state
+    setUserId("")
+    setConversationId(null)
   }
 
   return (
@@ -77,7 +77,8 @@ export function ChatApp({ user, profile }: ChatAppProps) {
             onNewChat={handleNewChat}
             onSelectConversation={handleSelectConversation}
             user={profile ? { email: profile.email, full_name: profile.full_name } : undefined}
-            onSignOut={user ? handleSignOut : undefined}
+            userId={userId}
+            onSignOut={handleSignOut}
           />
           {/* Mobile close button */}
           <Button
@@ -101,17 +102,14 @@ export function ChatApp({ user, profile }: ChatAppProps) {
 
       {/* Main chat area */}
       <main className="flex-1 overflow-hidden">
-        <ChatInterface
-          conversationId={conversationId}
-          onConversationCreated={handleConversationCreated}
-        />
+        {userId && (
+          <ChatInterface
+            conversationId={conversationId}
+            userId={userId}
+            onConversationCreated={handleConversationCreated}
+          />
+        )}
       </main>
-
-      {/* Auth dialog */}
-      <AuthDialog
-        open={showAuthDialog}
-        onOpenChange={setShowAuthDialog}
-      />
     </div>
   )
 }

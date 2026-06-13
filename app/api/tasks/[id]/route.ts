@@ -1,49 +1,97 @@
-import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { dbGet, dbRun } from "@/lib/db-utils"
 
-export async function PATCH(
+export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const { id } = params
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing task ID" }, { status: 400 })
     }
 
-    const body = await req.json()
-    const { title, description, status, priority, due_date } = body
+    const task = dbGet("SELECT * FROM tasks WHERE id = ?", [id])
 
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
-    if (title !== undefined) updateData.title = title
-    if (description !== undefined) updateData.description = description
-    if (status !== undefined) {
-      updateData.status = status
-      if (status === "completed") {
-        updateData.completed_at = new Date().toISOString()
+    if (!task) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 })
+    }
+
+    return NextResponse.json(task)
+  } catch (error) {
+    console.error("[v0] Error fetching task:", error)
+    return NextResponse.json(
+      { error: "Failed to fetch task" },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PUT(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { id } = params
+    const body = await req.json()
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing task ID" }, { status: 400 })
+    }
+
+    const task = dbGet("SELECT * FROM tasks WHERE id = ?", [id])
+    if (!task) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 })
+    }
+
+    // Update allowed fields
+    const updates: string[] = []
+    const values: any[] = []
+
+    if (body.title !== undefined) {
+      updates.push("title = ?")
+      values.push(body.title)
+    }
+    if (body.description !== undefined) {
+      updates.push("description = ?")
+      values.push(body.description)
+    }
+    if (body.status !== undefined) {
+      updates.push("status = ?")
+      values.push(body.status)
+      if (body.status === "completed") {
+        updates.push("completed_at = ?")
+        values.push(new Date().toISOString())
       }
     }
-    if (priority !== undefined) updateData.priority = priority
-    if (due_date !== undefined) updateData.due_date = due_date
-
-    const { data, error } = await supabase
-      .from("tasks")
-      .update(updateData)
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .select()
-      .single()
-
-    if (error) {
-      throw error
+    if (body.priority !== undefined) {
+      updates.push("priority = ?")
+      values.push(body.priority)
+    }
+    if (body.due_date !== undefined) {
+      updates.push("due_date = ?")
+      values.push(body.due_date)
+    }
+    if (body.tags !== undefined) {
+      updates.push("tags = ?")
+      values.push(JSON.stringify(body.tags))
     }
 
-    return NextResponse.json(data)
+    if (updates.length === 0) {
+      return NextResponse.json(task)
+    }
+
+    updates.push("updated_at = ?")
+    values.push(new Date().toISOString())
+    values.push(id)
+
+    dbRun(`UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`, values)
+    
+    const updated = dbGet("SELECT * FROM tasks WHERE id = ?", [id])
+    return NextResponse.json(updated)
   } catch (error) {
-    console.error("Error updating task:", error)
+    console.error("[v0] Error updating task:", error)
     return NextResponse.json(
       { error: "Failed to update task" },
       { status: 500 }
@@ -53,30 +101,25 @@ export async function PATCH(
 
 export async function DELETE(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const { id } = params
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing task ID" }, { status: 400 })
     }
 
-    const { error } = await supabase
-      .from("tasks")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id)
-
-    if (error) {
-      throw error
+    const task = dbGet("SELECT * FROM tasks WHERE id = ?", [id])
+    if (!task) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 })
     }
+
+    dbRun("DELETE FROM tasks WHERE id = ?", [id])
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Error deleting task:", error)
+    console.error("[v0] Error deleting task:", error)
     return NextResponse.json(
       { error: "Failed to delete task" },
       { status: 500 }

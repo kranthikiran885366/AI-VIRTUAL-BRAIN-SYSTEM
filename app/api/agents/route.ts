@@ -1,76 +1,97 @@
-import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
-import { AGENT_REGISTRY } from "@/lib/brain-service"
+import {
+  getAllAgents,
+  getAgent,
+  logAgentActivity,
+  getOrCreateUser,
+  generateId,
+} from "@/lib/db-utils"
+import { AGENT_REGISTRY, initBrainService } from "@/lib/brain-service"
 
-// Local agent definitions matching Python backend
-const LOCAL_AGENTS = Object.entries(AGENT_REGISTRY).map(([name, info], index) => ({
-  id: `local-${name}`,
-  name,
-  display_name: info.displayName,
-  description: `${info.displayName} - handles ${info.category} processing tasks`,
-  category: info.category,
-  is_active: true,
-  icon: info.icon,
-  color: info.color,
-  priority: index,
-}))
+// Initialize agents on startup
+initBrainService()
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const supabase = await createClient()
-    
-    // Try to fetch from database first
-    const { data, error } = await supabase
-      .from("agents")
-      .select("*")
-      .eq("is_active", true)
-      .order("priority", { ascending: true })
+    const { searchParams } = new URL(req.url)
+    const name = searchParams.get("name")
+    const activeOnly = searchParams.get("activeOnly") !== "false"
 
-    if (error) {
-      console.error("Database error, using local agents:", error)
-      // Return local agents as fallback
-      return NextResponse.json(LOCAL_AGENTS)
+    if (name) {
+      // Get specific agent
+      const agent = getAgent(name)
+      if (!agent) {
+        return NextResponse.json({ error: "Agent not found" }, { status: 404 })
+      }
+      return NextResponse.json(agent)
     }
 
-    // If no agents in database, return local agents
-    if (!data || data.length === 0) {
-      return NextResponse.json(LOCAL_AGENTS)
-    }
-
-    return NextResponse.json(data)
+    // Get all agents
+    const agents = getAllAgents(activeOnly)
+    return NextResponse.json(agents)
   } catch (error) {
-    console.error("Error fetching agents:", error)
-    // Return local agents as fallback
-    return NextResponse.json(LOCAL_AGENTS)
+    console.error("[v0] Error fetching agents:", error)
+    return NextResponse.json(
+      { error: "Failed to fetch agents" },
+      { status: 500 }
+    )
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const body = await req.json()
+    const { action, agentName, userId, input, conversationId } = body
+
+    // Create user if provided
+    let user = null
+    if (userId) {
+      user = getOrCreateUser(userId, "user@example.com", "AI User")
     }
 
-    const body = await req.json()
-    const { action, agentName, ...params } = body
-
-    // Handle agent execution
     if (action === "execute") {
-      // This would call the Python backend in production
+      if (!agentName) {
+        return NextResponse.json({ error: "Agent name required" }, { status: 400 })
+      }
+
+      const agent = getAgent(agentName)
+      if (!agent) {
+        return NextResponse.json({ error: "Agent not found" }, { status: 404 })
+      }
+
+      const startTime = Date.now()
+
+      // Log agent activity
+      if (user) {
+        logAgentActivity(
+          user.id,
+          agentName,
+          "execution",
+          { input },
+          { status: "success", message: "Agent executed" },
+          true,
+          undefined,
+          0,
+          Date.now() - startTime,
+          conversationId
+        )
+      }
+
       return NextResponse.json({
         status: "success",
         agentName,
-        result: { message: `Agent ${agentName} executed successfully` },
-        timestamp: new Date().toISOString(),
+        agent,
+        result: {
+          message: `Agent ${agent.display_name} executed successfully`,
+          timestamp: new Date().toISOString(),
+        },
+        latencyMs: Date.now() - startTime,
       })
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 })
   } catch (error) {
-    console.error("Error executing agent:", error)
+    console.error("[v0] Error executing agent:", error)
     return NextResponse.json(
       { error: "Failed to execute agent" },
       { status: 500 }
