@@ -64,7 +64,7 @@ export async function POST(req: Request) {
       // Log agent activity
       if (user) {
         logAgentActivity(
-          user.id,
+          (user as any).id,
           agentName,
           "execution",
           { input },
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
         agentName,
         agent,
         result: {
-          message: `Agent ${agent.display_name} executed successfully`,
+          message: `Agent ${(agent as any).display_name} executed successfully`,
           timestamp: new Date().toISOString(),
         },
         latencyMs: Date.now() - startTime,

@@ -9,10 +9,10 @@ import { redis, CACHE_KEYS } from "@/lib/cache"
 
 export async function GET(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: conversationId } = params
+    const { id: conversationId } = await params
 
     if (!conversationId) {
       return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
@@ -40,10 +40,10 @@ export async function GET(
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: conversationId } = params
+    const { id: conversationId } = await params
     const body = await req.json()
     const { userId, role, content } = body
 
@@ -76,7 +76,7 @@ export async function POST(
 
     // Invalidate caches
     await redis.del(CACHE_KEYS.conversationMessages(conversationId))
-    await redis.del(CACHE_KEYS.userConversations(conversation.user_id))
+    await redis.del(CACHE_KEYS.userConversations((conversation as any).user_id))
 
     return NextResponse.json(message)
   } catch (error) {

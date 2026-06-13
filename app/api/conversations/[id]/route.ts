@@ -8,10 +8,10 @@ import { redis, CACHE_KEYS, CACHE_TTL } from "@/lib/cache"
 
 export async function GET(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     if (!id) {
       return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
@@ -48,10 +48,10 @@ export async function GET(
 
 export async function PUT(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
     const body = await req.json()
 
     if (!id) {
@@ -78,7 +78,7 @@ export async function PUT(
 
     // Invalidate caches
     await redis.del(CACHE_KEYS.conversationMessages(id))
-    await redis.del(CACHE_KEYS.userConversations(conversation.user_id))
+    await redis.del(CACHE_KEYS.userConversations((conversation as any).user_id))
 
     return NextResponse.json(updated)
   } catch (error) {
@@ -92,10 +92,10 @@ export async function PUT(
 
 export async function DELETE(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     if (!id) {
       return NextResponse.json({ error: "Missing conversation ID" }, { status: 400 })
@@ -111,7 +111,7 @@ export async function DELETE(
 
     // Invalidate caches
     await redis.del(CACHE_KEYS.conversationMessages(id))
-    await redis.del(CACHE_KEYS.userConversations(conversation.user_id))
+    await redis.del(CACHE_KEYS.userConversations((conversation as any).user_id))
 
     return NextResponse.json({ success: true })
   } catch (error) {

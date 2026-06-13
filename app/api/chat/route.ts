@@ -14,7 +14,7 @@ import {
   generateId,
   getUserMemories,
   searchMemories,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 
 // Initialize brain service
 initBrainService()
@@ -488,7 +488,7 @@ Reasoning: ${routing.reasoning}`
     // Load relevant memories
     let memoryContext = ""
     try {
-      const memories = await brainService.recallMemories(user.id, userContent, 5)
+      const memories = await brainService.recallMemories((user as any).id, userContent, 5)
       if (memories.length > 0) {
         memoryContext = `\n\n[RELEVANT MEMORIES]
 ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: ${m.importance})`).join("\n")}`
@@ -507,7 +507,6 @@ ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: 
       system: systemPrompt,
       messages: await convertToModelMessages(conversationContext),
       tools: brainTools,
-      maxSteps: 8,
       temperature: 0.7,
       onFinish: async ({ text, usage, steps }) => {
         const latency = Date.now() - startTime
@@ -517,7 +516,7 @@ ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: 
           let convId = conversationId
           if (!convId && user) {
             const newConv = await createConversation(
-              user.id,
+              (user as any).id,
               userContent.slice(0, 50),
               model
             )
@@ -526,19 +525,19 @@ ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: 
 
           if (convId && user) {
             // Save the user message
-            createMessage(convId, user.id, "user", userContent)
+            createMessage(convId, (user as any).id, "user", userContent)
 
             // Save the assistant message
             createMessage(
               convId,
-              user.id,
+              (user as any).id,
               "assistant",
               text,
             )
 
             // Log agent activity
             await brainService.logActivity(
-              user.id,
+              (user as any).id,
               convId,
               routing.selectedAgent,
               "chat_response",
@@ -566,7 +565,7 @@ ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: 
             // Store important information as memory if confidence is high
             if (routing.confidence > 0.8 && routing.selectedAgent !== "orchestrator_agent") {
               await brainService.storeMemory(
-                user.id,
+                (user as any).id,
                 `User asked: ${userContent.slice(0, 100)}`,
                 "interaction",
                 routing.confidence,

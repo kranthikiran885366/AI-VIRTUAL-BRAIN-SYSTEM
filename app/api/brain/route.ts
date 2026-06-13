@@ -132,7 +132,7 @@ export async function POST(req: Request) {
         }
 
         const memory = await brainService.storeMemory(
-          user.id,
+          (user as any).id,
           content,
           memory_type,
           importance,
@@ -153,7 +153,7 @@ export async function POST(req: Request) {
         }
 
         const task = createTask(
-          user.id,
+          (user as any).id,
           title,
           description,
           priority,
@@ -174,7 +174,7 @@ export async function POST(req: Request) {
           return Response.json({ error: "Query required" }, { status: 400 })
         }
 
-        const memories = await brainService.recallMemories(user.id, query, limit)
+        const memories = await brainService.recallMemories((user as any).id, query, limit)
         return Response.json({ memories })
       }
 

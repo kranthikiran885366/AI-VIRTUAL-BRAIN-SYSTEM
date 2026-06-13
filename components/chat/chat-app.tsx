@@ -5,8 +5,7 @@ import { ChatSidebar } from "./chat-sidebar"
 import { ChatInterface } from "./chat-interface"
 import { Menu, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
-import { generateId } from "@/lib/db-utils"
+import { cn, generateId } from "@/lib/utils"
 
 interface ChatAppProps {
   user: any | null

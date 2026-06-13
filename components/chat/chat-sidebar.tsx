@@ -30,6 +30,7 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
 interface ChatSidebarProps {
   currentConversationId?: string
+  userId: string
   onNewChat: () => void
   onSelectConversation: (id: string) => void
   user?: { email?: string; full_name?: string }
@@ -38,6 +39,7 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({
   currentConversationId,
+  userId,
   onNewChat,
   onSelectConversation,
   user,
@@ -48,7 +50,7 @@ export function ChatSidebar({
   const router = useRouter()
 
   const { data: conversations, mutate } = useSWR<Conversation[]>(
-    "/api/conversations",
+    userId ? `/api/conversations?userId=${userId}` : null,
     fetcher,
     { refreshInterval: 30000 }
   )
@@ -76,13 +78,13 @@ export function ChatSidebar({
     e.stopPropagation()
     try {
       await fetch(`/api/conversations/${id}`, {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_archived: true }),
       })
       mutate()
     } catch (error) {
-      console.error("Failed to archive conversation:", error)
+      console.error("[v0] Failed to archive conversation:", error)
     }
   }
 
