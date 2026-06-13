@@ -85,8 +85,10 @@ class MemoryAgent(BaseAgent):
     
     async def add_memory(self, memory_data: Dict):
         """Add a memory to short-term memory."""
+        import uuid as uuid_module
+        
         memory = {
-            "id": memory_data.get("id", str(uuid.uuid4())),
+            "id": memory_data.get("id", str(uuid_module.uuid4())),
             "timestamp": datetime.utcnow().isoformat(),
             "type": memory_data.get("type", "general"),
             "content": memory_data.get("content", ""),
@@ -102,6 +104,17 @@ class MemoryAgent(BaseAgent):
         
         # Update index
         self._update_memory_index(memory)
+        
+        # Broadcast memory storage event
+        await self.broadcast_message(
+            "memory_store",
+            {
+                "memory_id": memory["id"],
+                "content": memory["content"][:100],
+                "importance": memory["importance"],
+                "type": memory["type"]
+            }
+        )
         
         # Check if consolidation is needed
         if len(self.short_term_memory) >= self.max_short_term_memory:

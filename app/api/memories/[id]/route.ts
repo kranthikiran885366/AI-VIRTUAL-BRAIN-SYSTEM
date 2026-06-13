@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { dbGet, dbRun } from "@/lib/db-utils"
+import { dbGet, dbRun } from "@/lib/server/db-utils"
 
 export async function GET(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     if (!id) {
       return NextResponse.json({ error: "Missing memory ID" }, { status: 400 })
@@ -30,10 +30,10 @@ export async function GET(
 
 export async function PUT(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
     const body = await req.json()
 
     if (!id) {
@@ -86,10 +86,10 @@ export async function PUT(
 
 export async function DELETE(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     if (!id) {
       return NextResponse.json({ error: "Missing memory ID" }, { status: 400 })

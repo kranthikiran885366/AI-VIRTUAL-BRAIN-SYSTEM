@@ -367,8 +367,7 @@ export function BrainNetwork({ compact = false, showConnections = true }: BrainN
                           boxShadow: isActive 
                             ? `0 0 20px ${agent.color}50` 
                             : undefined,
-                          ringColor: agent.color,
-                        }}
+                        } as any}
                       >
                         <Icon
                           className={cn(

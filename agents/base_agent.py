@@ -23,6 +23,9 @@ class BaseAgent:
         self.connections: Dict[str, List[str]] = {}
         self._process_task: Optional[asyncio.Task] = None
         self._initialized = False
+        self._message_broker = None
+        self._message_queue = None
+        self._last_heartbeat = None
     
     async def initialize(self):
         """Initialize the agent."""
@@ -49,11 +52,21 @@ class BaseAgent:
                 "surprise": 0.0
             }
             
+            # Initialize message broker connection
+            try:
+                from orchestrator.agent_communication import get_message_broker
+                self._message_broker = get_message_broker()
+                self._message_queue = await self._message_broker.register_agent(self.agent_id)
+                logger.debug(f"Agent {self.agent_id} registered with message broker")
+            except Exception as e:
+                logger.warning(f"Failed to initialize message broker for {self.agent_id}: {e}")
+            
             # Start processing task
             self._process_task = asyncio.create_task(self._process_loop())
             
             self._initialized = True
             self.state["status"] = "active"
+            self._last_heartbeat = datetime.utcnow()
             logger.info(f"Agent {self.agent_id} initialized")
         except Exception as e:
             logger.error(f"Failed to initialize agent {self.agent_id}: {str(e)}")
@@ -82,7 +95,13 @@ class BaseAgent:
                 # Update last active timestamp
                 self.state["last_active"] = datetime.utcnow().isoformat()
                 
-                # Process incoming messages
+                # Send heartbeat
+                await self._send_heartbeat()
+                
+                # Check for incoming messages
+                await self._process_incoming_messages()
+                
+                # Process incoming messages (legacy)
                 await self._process_messages()
                 
                 # Update agent state
@@ -100,6 +119,74 @@ class BaseAgent:
             except Exception as e:
                 logger.error(f"Error in agent {self.agent_id} processing loop: {str(e)}")
                 await asyncio.sleep(1)
+    
+    async def _send_heartbeat(self):
+        """Send a heartbeat message to indicate agent is alive."""
+        if self._message_broker:
+            try:
+                from orchestrator.agent_communication import MessageType, MessagePriority
+                await self._message_broker.send_message(
+                    sender_agent_id=self.agent_id,
+                    recipient_agent_id=None,  # Broadcast
+                    message_type=MessageType.HEARTBEAT,
+                    content={"status": self.state.get("status", "unknown")},
+                    priority=MessagePriority.LOW
+                )
+                self._last_heartbeat = datetime.utcnow()
+            except Exception as e:
+                logger.debug(f"Failed to send heartbeat for {self.agent_id}: {e}")
+    
+    async def _process_incoming_messages(self):
+        """Process incoming messages from message broker."""
+        if not self._message_queue:
+            return
+        
+        try:
+            from orchestrator.agent_communication import MessageType
+            
+            # Check for messages in queue
+            while True:
+                message = await asyncio.wait_for(self._message_queue.get(), timeout=0.1)
+                if not message:
+                    break
+                
+                # Route message to appropriate handler
+                if message.message_type == MessageType.MEMORY_RECALL:
+                    await self._handle_memory_recall(message)
+                elif message.message_type == MessageType.EMOTION_UPDATE:
+                    await self._handle_emotion_update(message)
+                elif message.message_type == MessageType.TASK_CREATE:
+                    await self._handle_task_create(message)
+                elif message.message_type == MessageType.DECISION_REQUEST:
+                    await self._handle_decision_request(message)
+                else:
+                    # Pass to subclass for handling
+                    await self._handle_custom_message(message)
+        
+        except asyncio.TimeoutError:
+            pass  # No messages in queue
+        except Exception as e:
+            logger.debug(f"Error processing messages for {self.agent_id}: {e}")
+    
+    async def _handle_memory_recall(self, message: Any):
+        """Handle memory recall request."""
+        pass
+    
+    async def _handle_emotion_update(self, message: Any):
+        """Handle emotion update."""
+        pass
+    
+    async def _handle_task_create(self, message: Any):
+        """Handle task creation."""
+        pass
+    
+    async def _handle_decision_request(self, message: Any):
+        """Handle decision request."""
+        pass
+    
+    async def _handle_custom_message(self, message: Any):
+        """Handle custom message - to be implemented by subclasses."""
+        pass
     
     async def _process_messages(self):
         """Process incoming messages."""
@@ -184,4 +271,91 @@ class BaseAgent:
     async def clear_memory(self):
         """Clear all memories."""
         self.memory.clear()
-        logger.info(f"Cleared memories for agent {self.agent_id}") 
+        logger.info(f"Cleared memories for agent {self.agent_id}")
+    
+    async def send_message(
+        self,
+        recipient_agent_id: str,
+        message_type: str,
+        content: Dict[str, Any],
+        priority: str = "normal"
+    ) -> Optional[str]:
+        """Send a message to another agent."""
+        if not self._message_broker:
+            logger.warning(f"Message broker not available for {self.agent_id}")
+            return None
+        
+        try:
+            from orchestrator.agent_communication import MessageType, MessagePriority
+            
+            # Map string priority to enum
+            priority_map = {
+                "low": MessagePriority.LOW,
+                "normal": MessagePriority.NORMAL,
+                "high": MessagePriority.HIGH,
+                "critical": MessagePriority.CRITICAL,
+            }
+            
+            # Map string message type to enum
+            try:
+                msg_type = MessageType[message_type.upper()]
+            except KeyError:
+                logger.warning(f"Unknown message type: {message_type}")
+                return None
+            
+            message_id = await self._message_broker.send_message(
+                sender_agent_id=self.agent_id,
+                recipient_agent_id=recipient_agent_id,
+                message_type=msg_type,
+                content=content,
+                priority=priority_map.get(priority.lower(), MessagePriority.NORMAL)
+            )
+            
+            logger.debug(f"Message {message_id} sent from {self.agent_id} to {recipient_agent_id}")
+            return message_id
+        
+        except Exception as e:
+            logger.error(f"Failed to send message from {self.agent_id}: {e}")
+            return None
+    
+    async def broadcast_message(
+        self,
+        message_type: str,
+        content: Dict[str, Any],
+        priority: str = "normal"
+    ) -> Optional[str]:
+        """Broadcast a message to all agents."""
+        if not self._message_broker:
+            logger.warning(f"Message broker not available for {self.agent_id}")
+            return None
+        
+        try:
+            from orchestrator.agent_communication import MessageType, MessagePriority
+            
+            priority_map = {
+                "low": MessagePriority.LOW,
+                "normal": MessagePriority.NORMAL,
+                "high": MessagePriority.HIGH,
+                "critical": MessagePriority.CRITICAL,
+            }
+            
+            try:
+                msg_type = MessageType[message_type.upper()]
+            except KeyError:
+                logger.warning(f"Unknown message type: {message_type}")
+                return None
+            
+            message_id = await self._message_broker.send_message(
+                sender_agent_id=self.agent_id,
+                recipient_agent_id=None,  # Broadcast
+                message_type=msg_type,
+                content=content,
+                priority=priority_map.get(priority.lower(), MessagePriority.NORMAL)
+            )
+            
+            logger.debug(f"Broadcast message {message_id} from {self.agent_id}")
+            return message_id
+        
+        except Exception as e:
+            logger.error(f"Failed to broadcast message from {self.agent_id}: {e}")
+            return None 

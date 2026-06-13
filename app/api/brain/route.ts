@@ -7,10 +7,7 @@ import {
   createTask,
   dbAll,
   logAgentActivity,
-} from "@/lib/db-utils"
-
-// Initialize brain service
-initBrainService()
+} from "@/lib/server/db-utils"
 
 /**
  * Brain API - Direct interface to the AI Virtual Brain backend
@@ -24,6 +21,7 @@ initBrainService()
  */
 
 export async function GET(req: Request) {
+  initBrainService()
   try {
     const { searchParams } = new URL(req.url)
     const action = searchParams.get("action") || "status"
@@ -99,6 +97,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  initBrainService()
   try {
     const body = await req.json()
     const { action, ...params } = body
@@ -132,7 +131,7 @@ export async function POST(req: Request) {
         }
 
         const memory = await brainService.storeMemory(
-          user.id,
+          (user as any).id,
           content,
           memory_type,
           importance,
@@ -153,7 +152,7 @@ export async function POST(req: Request) {
         }
 
         const task = createTask(
-          user.id,
+          (user as any).id,
           title,
           description,
           priority,
@@ -174,7 +173,7 @@ export async function POST(req: Request) {
           return Response.json({ error: "Query required" }, { status: 400 })
         }
 
-        const memories = await brainService.recallMemories(user.id, query, limit)
+        const memories = await brainService.recallMemories((user as any).id, query, limit)
         return Response.json({ memories })
       }
 

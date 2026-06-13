@@ -5,13 +5,12 @@ import {
   logAgentActivity,
   getOrCreateUser,
   generateId,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 import { AGENT_REGISTRY, initBrainService } from "@/lib/brain-service"
 
-// Initialize agents on startup
-initBrainService()
-
 export async function GET(req: Request) {
+  // Initialize on first request
+  initBrainService()
   try {
     const { searchParams } = new URL(req.url)
     const name = searchParams.get("name")
@@ -64,7 +63,7 @@ export async function POST(req: Request) {
       // Log agent activity
       if (user) {
         logAgentActivity(
-          user.id,
+          (user as any).id,
           agentName,
           "execution",
           { input },
@@ -82,7 +81,7 @@ export async function POST(req: Request) {
         agentName,
         agent,
         result: {
-          message: `Agent ${agent.display_name} executed successfully`,
+          message: `Agent ${(agent as any).display_name} executed successfully`,
           timestamp: new Date().toISOString(),
         },
         latencyMs: Date.now() - startTime,
