@@ -16,9 +16,6 @@ import {
   searchMemories,
 } from "@/lib/server/db-utils"
 
-// Initialize brain service
-initBrainService()
-
 /**
  * Advanced AI Virtual Brain Chat API
  * 
@@ -443,6 +440,7 @@ const brainTools = {
 }
 
 export async function POST(req: Request) {
+  initBrainService()
   const startTime = Date.now()
   
   try {
