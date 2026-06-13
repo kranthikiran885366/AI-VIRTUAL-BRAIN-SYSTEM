@@ -219,7 +219,7 @@ export function BrainActivity() {
         <div className="p-3 rounded-lg bg-secondary/30 text-center">
           <Zap className="h-4 w-4 mx-auto mb-1 text-yellow-500" />
           <p className="text-lg font-bold text-yellow-500">
-            {Object.values(brainStatus?.activityStats || {}).reduce((a, b: unknown) => a + (b as number || 0), 0)}
+            {(Object.values(brainStatus?.activityStats || {}).reduce((a: number, b: any) => a + (Number(b) || 0), 0) as any as React.ReactNode)}
           </p>
           <p className="text-xs text-muted-foreground">Ops/hr</p>
         </div>

@@ -143,11 +143,11 @@ export const ChatMessage = memo(function ChatMessage({
                     </span>
                   )}
                 </div>
-                {"output" in tool && tool.output && (
+                {"output" in tool && (tool as any).output && (
                   <pre className="text-xs font-mono bg-background/50 p-2 rounded mt-2 overflow-x-auto">
-                    {typeof tool.output === "string" 
-                      ? tool.output 
-                      : JSON.stringify(tool.output, null, 2)}
+                    {typeof (tool as any).output === "string" 
+                      ? (tool as any).output 
+                      : JSON.stringify((tool as any).output, null, 2)}
                   </pre>
                 )}
               </div>
