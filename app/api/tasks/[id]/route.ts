@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { dbGet, dbRun } from "@/lib/db-utils"
+import { dbGet, dbRun } from "@/lib/server/db-utils"
 
 export async function GET(
   req: Request,

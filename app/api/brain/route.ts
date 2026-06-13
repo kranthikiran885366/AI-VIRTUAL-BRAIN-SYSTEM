@@ -7,10 +7,7 @@ import {
   createTask,
   dbAll,
   logAgentActivity,
-} from "@/lib/db-utils"
-
-// Initialize brain service
-initBrainService()
+} from "@/lib/server/db-utils"
 
 /**
  * Brain API - Direct interface to the AI Virtual Brain backend
@@ -24,6 +21,7 @@ initBrainService()
  */
 
 export async function GET(req: Request) {
+  initBrainService()
   try {
     const { searchParams } = new URL(req.url)
     const action = searchParams.get("action") || "status"
@@ -99,6 +97,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  initBrainService()
   try {
     const body = await req.json()
     const { action, ...params } = body

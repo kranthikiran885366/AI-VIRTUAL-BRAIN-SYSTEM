@@ -4,7 +4,7 @@ import {
   getUserMemories,
   createMemory,
   searchMemories,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 
 export async function GET(req: Request) {
   try {

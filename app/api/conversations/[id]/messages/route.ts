@@ -4,7 +4,7 @@ import {
   createMessage,
   updateConversation,
   dbAll,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 import { redis, CACHE_KEYS } from "@/lib/cache"
 
 export async function GET(

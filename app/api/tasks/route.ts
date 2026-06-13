@@ -5,7 +5,7 @@ import {
   createTask,
   updateTask,
   generateId,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 
 export async function GET(req: Request) {
   try {

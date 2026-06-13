@@ -3,7 +3,7 @@ import {
   getConversation,
   updateConversation,
   dbAll,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 import { redis, CACHE_KEYS, CACHE_TTL } from "@/lib/cache"
 
 export async function GET(

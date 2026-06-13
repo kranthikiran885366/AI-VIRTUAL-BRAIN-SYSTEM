@@ -5,13 +5,12 @@ import {
   logAgentActivity,
   getOrCreateUser,
   generateId,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 import { AGENT_REGISTRY, initBrainService } from "@/lib/brain-service"
 
-// Initialize agents on startup
-initBrainService()
-
 export async function GET(req: Request) {
+  // Initialize on first request
+  initBrainService()
   try {
     const { searchParams } = new URL(req.url)
     const name = searchParams.get("name")

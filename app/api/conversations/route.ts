@@ -4,7 +4,7 @@ import {
   getUserConversations,
   createConversation,
   generateId,
-} from "@/lib/db-utils"
+} from "@/lib/server/db-utils"
 import { redis, CACHE_KEYS, CACHE_TTL, cacheGet, cacheSet } from "@/lib/cache"
 
 export async function GET(req: Request) {
