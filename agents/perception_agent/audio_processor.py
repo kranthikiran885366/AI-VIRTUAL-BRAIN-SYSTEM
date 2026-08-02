@@ -6,7 +6,13 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import librosa
 import soundfile as sf
-from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+try:
+    from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+    _HAS_TRANSFORMERS = True
+except Exception:
+    Wav2Vec2ForCTC = None
+    Wav2Vec2Processor = None
+    _HAS_TRANSFORMERS = False
 import torchaudio
 
 @dataclass
@@ -35,13 +41,21 @@ class AudioProcessor:
     
     def _init_models(self):
         """Initialize audio processing models."""
-        # Initialize speech recognition model
-        self.processor = Wav2Vec2Processor.from_pretrained(self.config.model_path)
-        self.model = Wav2Vec2ForCTC.from_pretrained(self.config.model_path)
-        
-        # Move model to specified device
-        if self.config.device == "cuda" and torch.cuda.is_available():
-            self.model = self.model.to("cuda")
+        # Initialize speech recognition model if available
+        if _HAS_TRANSFORMERS and Wav2Vec2Processor and Wav2Vec2ForCTC:
+            try:
+                self.processor = Wav2Vec2Processor.from_pretrained(self.config.model_path)
+                self.model = Wav2Vec2ForCTC.from_pretrained(self.config.model_path)
+                # Move model to specified device
+                if self.config.device == "cuda" and torch.cuda.is_available():
+                    self.model = self.model.to("cuda")
+            except Exception as e:
+                self.logger.error(f"Error initializing Wav2Vec models: {e}")
+                self.processor = None
+                self.model = None
+        else:
+            self.processor = None
+            self.model = None
     
     def process(self, audio_data: Optional[np.ndarray]) -> Dict[str, Any]:
         """Process audio data."""
@@ -127,28 +141,31 @@ class AudioProcessor:
         
         try:
             # Prepare audio for model
+            if not self.processor or not self.model:
+                return result
+
             inputs = self.processor(
                 audio_data,
                 sampling_rate=self.config.sample_rate,
                 return_tensors="pt"
             )
-            
+
             # Move inputs to device
             if self.config.device == "cuda" and torch.cuda.is_available():
                 inputs = {k: v.to("cuda") for k, v in inputs.items()}
-            
+
             # Perform inference
             with torch.no_grad():
                 logits = self.model(**inputs).logits
-            
+
             # Decode predictions
             predicted_ids = torch.argmax(logits, dim=-1)
             transcription = self.processor.batch_decode(predicted_ids)
-            
+
             # Calculate confidence
             probs = torch.nn.functional.softmax(logits, dim=-1)
             confidence = torch.mean(torch.max(probs, dim=-1)[0]).item()
-            
+
             result = {
                 "text": transcription[0],
                 "confidence": confidence

@@ -1,339 +1,288 @@
-import logging
-import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
-import yaml
-from pathlib import Path
+"""
+SpeakerIdentifier — Production implementation with lazy imports.
+
+Backends (in priority order):
+  1. Resemblyzer — VoiceEncoder for d-vector speaker embeddings
+  2. Pure-numpy cosine similarity on MFCCs (when Resemblyzer unavailable)
+"""
+
 import asyncio
+import logging
+import os
+import pickle
 import queue
 import threading
-from resemblyzer import VoiceEncoder, preprocess_wav
+import time as _time
+from datetime import datetime
 from pathlib import Path
-import librosa
-import pickle
-import os
+from typing import Any, Callable, Dict, List, Optional
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+    np = None  # type: ignore
+
 
 class SpeakerIdentifier:
-    def __init__(self, config_path: str = "config/ear_agent_config.yaml"):
+    """Identifies speakers in audio using Resemblyzer (primary) or MFCC cosine similarity (fallback)."""
+
+    def __init__(self, config: Dict[str, Any]):
         self.logger = logging.getLogger(__name__)
-        self.config = self._load_config(config_path)
-        self.speaker_config = self.config.get("speaker_identification", {})
-        
-        # Initialize speaker identification parameters
-        self.model = self.speaker_config.get("model", "resemblyzer")
-        self.min_samples = self.speaker_config.get("min_samples", 3)
-        self.confidence_threshold = self.speaker_config.get("confidence_threshold", 0.7)
-        self.max_speakers = self.speaker_config.get("max_speakers", 5)
-        
-        # Initialize components
+        self.config = config
+        spk_cfg = config.get("speaker_identification", {})
+
+        self.model_name: str = spk_cfg.get("model", "resemblyzer")
+        self.min_samples: int = int(spk_cfg.get("min_samples", 3))
+        self.confidence_threshold: float = float(spk_cfg.get("confidence_threshold", 0.70))
+        self.max_speakers: int = int(spk_cfg.get("max_speakers", 10))
+        self.sample_rate: int = int(config.get("audio", {}).get("sample_rate", 16000))
+
+        _data_dir = spk_cfg.get("data_dir", "data/speakers")
+        self._data_dir: Path = Path(_data_dir)
+        self._embeddings_file: Path = self._data_dir / "embeddings.pkl"
+        self._names_file: Path = self._data_dir / "names.pkl"
+
+        self._backend: str = "mfcc"
         self.encoder = None
-        self.speaker_embeddings = {}
-        self.speaker_names = {}
-        self.processing_queue = queue.Queue()
-        self.is_processing = False
-        self.processing_thread = None
-        
-        # Load model and speaker data
+        self._preprocess_wav_fn = None
+        self.speaker_embeddings: Dict[str, Any] = {}
+        self.speaker_names: Dict[str, str] = {}
+
+        self.processing_queue: queue.Queue = queue.Queue()
+        self.is_processing: bool = False
+        self.processing_thread: Optional[threading.Thread] = None
+
         self._initialize_model()
         self._load_speaker_data()
-    
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file"""
-        try:
-            config_file = Path(config_path)
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    return yaml.safe_load(f)
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading config: {e}")
-            return {}
-    
+
+    # ─── Model Initialization ─────────────────────────────────────────────────
+
     def _initialize_model(self):
-        """Initialize speaker identification model"""
-        try:
-            if self.model == "resemblyzer":
+        if self.model_name in ("resemblyzer", "auto") and _HAS_NUMPY:
+            try:
+                from resemblyzer import VoiceEncoder, preprocess_wav
                 self.encoder = VoiceEncoder()
-                self.logger.info("Initialized Resemblyzer model")
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
-        except Exception as e:
-            self.logger.error(f"Error initializing speaker identification model: {e}")
-            raise
-    
-    def _load_speaker_data(self):
-        """Load speaker embeddings and names"""
-        try:
-            data_dir = Path("data/speakers")
-            if not data_dir.exists():
-                data_dir.mkdir(parents=True)
+                self._preprocess_wav_fn = preprocess_wav
+                self._backend = "resemblyzer"
+                self.logger.info("SpeakerIdentifier: loaded Resemblyzer VoiceEncoder")
                 return
-            
-            # Load speaker embeddings
-            embeddings_file = data_dir / "embeddings.pkl"
-            if embeddings_file.exists():
-                with open(embeddings_file, "rb") as f:
+            except Exception as e:
+                self.logger.warning(f"SpeakerIdentifier: Resemblyzer load failed — {e}")
+
+        if _HAS_NUMPY:
+            self._backend = "mfcc"
+            self.logger.info("SpeakerIdentifier: using MFCC cosine-similarity fallback")
+        else:
+            self.logger.warning("SpeakerIdentifier: no backend available")
+
+    # ─── Speaker Data Persistence ─────────────────────────────────────────────
+
+    def _load_speaker_data(self):
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            if self._embeddings_file.exists():
+                with open(self._embeddings_file, "rb") as f:
                     self.speaker_embeddings = pickle.load(f)
-            
-            # Load speaker names
-            names_file = data_dir / "names.pkl"
-            if names_file.exists():
-                with open(names_file, "rb") as f:
+            if self._names_file.exists():
+                with open(self._names_file, "rb") as f:
                     self.speaker_names = pickle.load(f)
-            
-            self.logger.info(f"Loaded {len(self.speaker_embeddings)} speaker profiles")
-        
+            self.logger.info(f"SpeakerIdentifier: loaded {len(self.speaker_embeddings)} speaker profile(s)")
         except Exception as e:
-            self.logger.error(f"Error loading speaker data: {e}")
-    
+            self.logger.error(f"SpeakerIdentifier: failed to load speaker data — {e}")
+            self.speaker_embeddings = {}
+            self.speaker_names = {}
+
     def _save_speaker_data(self):
-        """Save speaker embeddings and names"""
         try:
-            data_dir = Path("data/speakers")
-            if not data_dir.exists():
-                data_dir.mkdir(parents=True)
-            
-            # Save speaker embeddings
-            with open(data_dir / "embeddings.pkl", "wb") as f:
+            self._data_dir.mkdir(parents=True, exist_ok=True)
+            with open(self._embeddings_file, "wb") as f:
                 pickle.dump(self.speaker_embeddings, f)
-            
-            # Save speaker names
-            with open(data_dir / "names.pkl", "wb") as f:
+            with open(self._names_file, "wb") as f:
                 pickle.dump(self.speaker_names, f)
-            
-            self.logger.info("Saved speaker data")
-        
+            self.logger.info("SpeakerIdentifier: speaker data saved")
         except Exception as e:
-            self.logger.error(f"Error saving speaker data: {e}")
-    
-    async def identify_speaker(self, audio_data: np.ndarray, sample_rate: int = 16000) -> List[Dict[str, Any]]:
-        """Identify speaker in audio data"""
+            self.logger.error(f"SpeakerIdentifier: failed to save speaker data — {e}")
+
+    # ─── Main Identification API ──────────────────────────────────────────────
+
+    async def identify_speaker(self, audio_data, sample_rate: int = None) -> List[Dict[str, Any]]:
+        sr = sample_rate or self.sample_rate
+        if not self.speaker_embeddings:
+            return [{"speaker_id": "unknown", "name": "Unknown",
+                     "confidence": 0.0, "timestamp": datetime.utcnow().isoformat()}]
         try:
-            if self.model == "resemblyzer":
-                return await self._identify_resemblyzer(audio_data, sample_rate)
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
+            if self._backend == "resemblyzer":
+                return self._identify_resemblyzer(audio_data, sr)
+            return self._identify_mfcc(audio_data, sr)
         except Exception as e:
-            self.logger.error(f"Error identifying speaker: {e}")
+            self.logger.error(f"SpeakerIdentifier.identify_speaker failed: {e}")
             return []
-    
-    async def _identify_resemblyzer(self, audio_data: np.ndarray, sample_rate: int) -> List[Dict[str, Any]]:
-        """Identify speaker using Resemblyzer"""
+
+    # ─── Resemblyzer Backend ──────────────────────────────────────────────────
+
+    def _identify_resemblyzer(self, audio_data, sample_rate: int) -> List[Dict[str, Any]]:
         try:
-            # Preprocess audio
-            audio_float32 = audio_data.astype(np.float32) / 32768.0
-            wav = preprocess_wav(audio_float32, sample_rate)
-            
-            # Get embedding
+            import numpy as np_local
+            audio_f32 = audio_data.astype(np_local.float32) / 32768.0
+            wav = self._preprocess_wav_fn(audio_f32, source_sr=sample_rate)
             embedding = self.encoder.embed_utterance(wav)
-            
-            # Compare with known speakers
-            results = []
-            for speaker_id, known_embedding in self.speaker_embeddings.items():
-                similarity = np.dot(embedding, known_embedding)
-                
-                if similarity >= self.confidence_threshold:
-                    results.append({
-                        "speaker_id": speaker_id,
-                        "name": self.speaker_names.get(speaker_id, "Unknown"),
-                        "confidence": float(similarity),
-                        "timestamp": asyncio.get_event_loop().time()
-                    })
-            
-            # Sort by confidence
-            results.sort(key=lambda x: x["confidence"], reverse=True)
-            
-            return results[:self.max_speakers]
-        
+            embedding = embedding / (np_local.linalg.norm(embedding) + 1e-10)
+
+            return self._score_against_profiles(embedding)
         except Exception as e:
-            self.logger.error(f"Error in Resemblyzer identification: {e}")
-            return []
-    
-    def add_speaker(self, speaker_id: str, name: str, audio_samples: List[np.ndarray], sample_rate: int = 16000) -> bool:
-        """Add a new speaker profile"""
+            self.logger.error(f"SpeakerIdentifier: Resemblyzer inference failed: {e}")
+            return self._identify_mfcc(audio_data, sample_rate)
+
+    # ─── MFCC Cosine Similarity Fallback ─────────────────────────────────────
+
+    def _identify_mfcc(self, audio_data, sample_rate: int) -> List[Dict[str, Any]]:
         try:
-            if len(audio_samples) < self.min_samples:
-                raise ValueError(f"Need at least {self.min_samples} samples")
-            
-            # Process each sample
+            import numpy as np_local
+            audio_f32 = audio_data.astype(np_local.float32) / 32768.0
+
+            try:
+                import librosa
+                mfccs = librosa.feature.mfcc(y=audio_f32, sr=sample_rate, n_mfcc=40)
+                embedding = np_local.mean(mfccs, axis=1)
+            except Exception:
+                chunk_size = max(1, len(audio_f32) // 10)
+                embedding = np_local.array([
+                    float(np_local.sqrt(np_local.mean(audio_f32[i*chunk_size:(i+1)*chunk_size]**2)))
+                    for i in range(10)
+                ])
+
+            norm = np_local.linalg.norm(embedding)
+            if norm > 0:
+                embedding = embedding / norm
+
+            return self._score_against_profiles(embedding)
+        except Exception as e:
+            self.logger.error(f"SpeakerIdentifier: MFCC fallback failed: {e}")
+            return []
+
+    def _score_against_profiles(self, embedding) -> List[Dict[str, Any]]:
+        import numpy as np_local
+        ts = datetime.utcnow().isoformat()
+        results = []
+        for speaker_id, known_emb in self.speaker_embeddings.items():
+            known_norm = np_local.linalg.norm(known_emb)
+            if known_norm > 0:
+                known_emb = known_emb / known_norm
+            similarity = float(np_local.dot(embedding, known_emb))
+            similarity = max(0.0, min(1.0, similarity))
+
+            if similarity >= self.confidence_threshold:
+                results.append({
+                    "speaker_id": speaker_id,
+                    "name": self.speaker_names.get(speaker_id, "Unknown"),
+                    "confidence": round(similarity, 4),
+                    "timestamp": ts,
+                    "backend": self._backend,
+                })
+
+        results.sort(key=lambda x: x["confidence"], reverse=True)
+        return results[:self.max_speakers]
+
+    # ─── Speaker Management ───────────────────────────────────────────────────
+
+    def add_speaker(self, speaker_id: str, name: str, audio_samples: List, sample_rate: int = None) -> bool:
+        sr = sample_rate or self.sample_rate
+        if not speaker_id or not speaker_id.strip():
+            self.logger.error("SpeakerIdentifier.add_speaker: speaker_id cannot be empty")
+            return False
+        if len(audio_samples) < self.min_samples:
+            self.logger.error(f"SpeakerIdentifier.add_speaker: need at least {self.min_samples} samples, got {len(audio_samples)}")
+            return False
+
+        try:
+            import numpy as np_local
             embeddings = []
             for audio in audio_samples:
-                # Preprocess audio
-                audio_float32 = audio.astype(np.float32) / 32768.0
-                wav = preprocess_wav(audio_float32, sample_rate)
-                
-                # Get embedding
-                embedding = self.encoder.embed_utterance(wav)
-                embeddings.append(embedding)
-            
-            # Average embeddings
-            avg_embedding = np.mean(embeddings, axis=0)
-            
-            # Save speaker data
+                if not isinstance(audio, np_local.ndarray):
+                    audio = np_local.frombuffer(bytes(audio), dtype=np_local.int16)
+                if self._backend == "resemblyzer":
+                    audio_f32 = audio.astype(np_local.float32) / 32768.0
+                    wav = self._preprocess_wav_fn(audio_f32, source_sr=sr)
+                    emb = self.encoder.embed_utterance(wav)
+                else:
+                    audio_f32 = audio.astype(np_local.float32) / 32768.0
+                    try:
+                        import librosa
+                        mfccs = librosa.feature.mfcc(y=audio_f32, sr=sr, n_mfcc=40)
+                        emb = np_local.mean(mfccs, axis=1)
+                    except Exception:
+                        chunk_size = max(1, len(audio_f32) // 10)
+                        emb = np_local.array([
+                            float(np_local.sqrt(np_local.mean(audio_f32[i*chunk_size:(i+1)*chunk_size]**2)))
+                            for i in range(10)
+                        ])
+                embeddings.append(emb)
+
+            avg_embedding = np_local.mean(embeddings, axis=0)
             self.speaker_embeddings[speaker_id] = avg_embedding
             self.speaker_names[speaker_id] = name
-            
-            # Save to disk
             self._save_speaker_data()
-            
-            self.logger.info(f"Added speaker profile for {name}")
+            self.logger.info(f"SpeakerIdentifier: added profile for '{name}' (id={speaker_id})")
             return True
-        
         except Exception as e:
-            self.logger.error(f"Error adding speaker: {e}")
+            self.logger.error(f"SpeakerIdentifier.add_speaker failed: {e}")
             return False
-    
-    def remove_speaker(self, speaker_id: str) -> bool:
-        """Remove a speaker profile"""
-        try:
-            if speaker_id not in self.speaker_embeddings:
-                return False
-            
-            # Remove speaker data
-            del self.speaker_embeddings[speaker_id]
-            del self.speaker_names[speaker_id]
-            
-            # Save to disk
-            self._save_speaker_data()
-            
-            self.logger.info(f"Removed speaker profile {speaker_id}")
-            return True
-        
-        except Exception as e:
-            self.logger.error(f"Error removing speaker: {e}")
-            return False
-    
-    def get_speaker_profiles(self) -> List[Dict[str, Any]]:
-        """Get list of speaker profiles"""
-        try:
-            return [
-                {
-                    "speaker_id": speaker_id,
-                    "name": self.speaker_names.get(speaker_id, "Unknown")
-                }
-                for speaker_id in self.speaker_embeddings
-            ]
-        except Exception as e:
-            self.logger.error(f"Error getting speaker profiles: {e}")
-            return []
-    
-    def start_processing(self, callback: Optional[callable] = None):
-        """Start speaker identification processing"""
-        try:
-            if self.is_processing:
-                self.logger.warning("Already processing")
-                return
-            
-            self.is_processing = True
-            
-            # Start processing thread
-            self.processing_thread = threading.Thread(
-                target=self._process_queue,
-                args=(callback,) if callback else (),
-                daemon=True
-            )
-            self.processing_thread.start()
-            
-            self.logger.info("Started speaker identification processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error starting speaker identification: {e}")
-            self.is_processing = False
-            raise
-    
-    def stop_processing(self):
-        """Stop speaker identification processing"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.is_processing = False
-            
-            if self.processing_thread:
-                self.processing_thread.join(timeout=5)
-                self.processing_thread = None
-            
-            self.logger.info("Stopped speaker identification processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error stopping speaker identification: {e}")
-            raise
-    
-    def _process_queue(self, callback: Optional[callable] = None):
-        """Process audio data from queue"""
-        try:
-            while self.is_processing:
-                try:
-                    # Get audio data from queue
-                    audio_data = self.processing_queue.get(timeout=1)
-                    
-                    # Identify speaker
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    results = loop.run_until_complete(
-                        self.identify_speaker(audio_data["audio"])
-                    )
-                    loop.close()
-                    
-                    # Call callback if provided
-                    if callback and results:
-                        callback({
-                            "results": results,
-                            "timestamp": audio_data["timestamp"]
-                        })
-                    
-                    self.processing_queue.task_done()
-                
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    self.logger.error(f"Error processing audio: {e}")
-        
-        except Exception as e:
-            self.logger.error(f"Error in speaker identification thread: {e}")
-    
-    def add_audio_data(self, audio_data: np.ndarray, timestamp: float):
-        """Add audio data to processing queue"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.processing_queue.put({
-                "audio": audio_data,
-                "timestamp": timestamp
-            })
-        
-        except Exception as e:
-            self.logger.error(f"Error adding audio data: {e}")
-    
-    def cleanup(self):
-        """Clean up resources"""
-        try:
-            self.stop_processing()
-            if self.encoder:
-                del self.encoder
-        except Exception as e:
-            self.logger.error(f"Error cleaning up speaker identifier: {e}")
 
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Test speaker identifier
-    async def test_identifier():
-        identifier = SpeakerIdentifier()
-        try:
-            # Test with dummy audio data
-            audio_data = np.zeros(16000, dtype=np.int16)  # 1 second of silence
-            results = await identifier.identify_speaker(audio_data)
-            print("Identification results:")
-            for result in results:
-                print(f"- {result['name']}: {result['confidence']:.2f}")
-        finally:
-            identifier.cleanup()
-    
-    asyncio.run(test_identifier()) 
+    def remove_speaker(self, speaker_id: str) -> bool:
+        if speaker_id not in self.speaker_embeddings:
+            return False
+        del self.speaker_embeddings[speaker_id]
+        del self.speaker_names[speaker_id]
+        self._save_speaker_data()
+        self.logger.info(f"SpeakerIdentifier: removed profile {speaker_id}")
+        return True
+
+    def get_speaker_profiles(self) -> List[Dict[str, Any]]:
+        return [
+            {"speaker_id": sid, "name": self.speaker_names.get(sid, "Unknown")}
+            for sid in self.speaker_embeddings
+        ]
+
+    # ─── Processing Thread ────────────────────────────────────────────────────
+
+    def start_processing(self, callback: Optional[Callable] = None):
+        if self.is_processing:
+            return
+        self.is_processing = True
+        self.processing_thread = threading.Thread(
+            target=self._processing_loop, args=(callback,), daemon=True
+        )
+        self.processing_thread.start()
+        self.logger.info("SpeakerIdentifier: processing thread started")
+
+    def stop_processing(self):
+        self.is_processing = False
+        if self.processing_thread:
+            self.processing_thread.join(timeout=5)
+            self.processing_thread = None
+
+    def _processing_loop(self, callback: Optional[Callable]):
+        while self.is_processing:
+            try:
+                item = self.processing_queue.get(timeout=1.0)
+                results = asyncio.run(self.identify_speaker(item["audio"]))
+                for r in results:
+                    r["audio_timestamp"] = item["timestamp"]
+                    if callback:
+                        callback(r)
+                self.processing_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.logger.error(f"SpeakerIdentifier: processing loop error: {e}")
+
+    def add_audio_data(self, audio_data, timestamp: float):
+        if not self.is_processing:
+            return
+        self.processing_queue.put({"audio": audio_data, "timestamp": timestamp})
+
+    def cleanup(self):
+        self.stop_processing()
+        self.encoder = None

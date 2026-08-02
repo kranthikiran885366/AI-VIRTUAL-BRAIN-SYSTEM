@@ -247,3 +247,7 @@ ckpt/
 .env.production
 secrets.json
 config/secrets.yaml 
+
+# Node / Next build artifacts
+node_modules/
+.next/

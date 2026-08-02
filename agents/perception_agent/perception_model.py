@@ -4,7 +4,13 @@ import time
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+try:
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    _HAS_TRANSFORMERS = True
+except Exception:
+    AutoModelForSequenceClassification = None
+    AutoTokenizer = None
+    _HAS_TRANSFORMERS = False
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -34,14 +40,21 @@ class PerceptionModel(nn.Module):
     
     def _init_models(self):
         """Initialize perception models."""
-        # Initialize base model
-        self.base_model = AutoModelForSequenceClassification.from_pretrained(
-            self.config.model_path,
-            num_labels=self.config.num_classes
-        )
-        
-        # Initialize tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
+        # Initialize base model and tokenizer when available
+        if _HAS_TRANSFORMERS and AutoModelForSequenceClassification and AutoTokenizer:
+            try:
+                self.base_model = AutoModelForSequenceClassification.from_pretrained(
+                    self.config.model_path,
+                    num_labels=self.config.num_classes
+                )
+                self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
+            except Exception as e:
+                self.logger.error(f"Error initializing perception transformers: {e}")
+                self.base_model = None
+                self.tokenizer = None
+        else:
+            self.base_model = None
+            self.tokenizer = None
         
         # Initialize custom layers
         self.visual_encoder = nn.Sequential(

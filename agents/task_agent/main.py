@@ -1,245 +1,263 @@
 import asyncio
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 import uuid
 
-from structlog import get_logger
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+try:
+    from structlog import get_logger
+except ImportError:
+    def get_logger(): return logging.getLogger(__name__)
 
-from ...config import settings
-from ..base_agent import BaseAgent
-from .task_processor import TaskProcessor
-from .task_store import TaskStore
-from .task_analyzer import TaskAnalyzer
-from .task_automation import TaskAutomation
+try:
+    from fastapi import FastAPI, HTTPException
+    from pydantic import BaseModel
+except ImportError:
+    FastAPI = None
+    HTTPException = Exception
+    BaseModel = object
+
+try:
+    from agents.base_agent import BaseAgent
+except ImportError:
+    try:
+        from ..base_agent import BaseAgent
+    except ImportError:
+        class BaseAgent:
+            def __init__(self, **kwargs):
+                self.agent_id = kwargs.get("agent_id", str(uuid.uuid4()))
+                self.agent_type = kwargs.get("agent_type", "base")
+                self.state = kwargs.get("state", {})
+                self.memory = kwargs.get("memory", [])
+                self.emotions = kwargs.get("emotions", {})
+                self.connections = kwargs.get("connections", {})
+            async def initialize(self): pass
+            async def shutdown(self): pass
+            async def _establish_connection(self, *a, **kw): pass
+
+try:
+    from agents.task_agent.task_processor import TaskProcessor
+    from agents.task_agent.task_store import TaskStore
+    from agents.task_agent.task_analyzer import TaskAnalyzer
+    from agents.task_agent.task_automation import TaskAutomation
+except ImportError:
+    try:
+        from .task_processor import TaskProcessor
+        from .task_store import TaskStore
+        from .task_analyzer import TaskAnalyzer
+        from .task_automation import TaskAutomation
+    except ImportError:
+        TaskProcessor = TaskStore = TaskAnalyzer = TaskAutomation = None
 
 logger = get_logger()
 
-class TaskData(BaseModel):
-    """Task data model."""
-    title: str
-    description: str
-    priority: int
-    status: str = "pending"
-    due_date: Optional[str] = None
-    dependencies: List[str] = []
-    tags: List[str] = []
-    context: Dict[str, Any] = {}
-    assigned_to: Optional[str] = None
+if BaseModel is not object:
+    class TaskData(BaseModel):
+        title: str
+        description: str = ""
+        priority: int = 1
+        status: str = "pending"
+        due_date: Optional[str] = None
+        dependencies: List[str] = []
+        tags: List[str] = []
+        context: Dict[str, Any] = {}
+        assigned_to: Optional[str] = None
 
-class TaskQuery(BaseModel):
-    """Task query model."""
-    status: Optional[str] = None
-    priority: Optional[int] = None
-    tags: Optional[List[str]] = None
-    assigned_to: Optional[str] = None
-    due_before: Optional[str] = None
-    due_after: Optional[str] = None
+    class TaskQuery(BaseModel):
+        status: Optional[str] = None
+        priority: Optional[int] = None
+        tags: Optional[List[str]] = None
+        assigned_to: Optional[str] = None
+        due_before: Optional[str] = None
+        due_after: Optional[str] = None
+else:
+    TaskData = dict
+    TaskQuery = dict
+
 
 class TaskAgent(BaseAgent):
-    """Task Agent for managing and automating tasks."""
-    
+    """Task Agent — creates, stores, analyzes, and automates tasks."""
+
     def __init__(self):
-        """Initialize the Task Agent."""
         super().__init__(
-            agent_id=str(uuid.uuid4()),
+            agent_id="task_agent",
             agent_type="task",
-            state={},
-            memory=[],
-            emotions={},
-            connections=[]
         )
-        
-        # Initialize components
-        self.processor = TaskProcessor()
-        self.store = TaskStore()
-        self.analyzer = TaskAnalyzer()
-        self.automation = TaskAutomation()
-        
-        # Create FastAPI app
-        self.app = FastAPI(title="Task Agent API")
-        self._setup_routes()
-    
+        # Build store first, inject into processor so tasks persist
+        self.store = TaskStore() if TaskStore else None
+        self.processor = TaskProcessor(store=self.store) if TaskProcessor else None
+        self.analyzer = TaskAnalyzer() if TaskAnalyzer else None
+        self.automation = TaskAutomation() if TaskAutomation else None
+
+        if FastAPI:
+            self.app = FastAPI(title="Task Agent API")
+            self._setup_routes()
+
     def _setup_routes(self):
-        """Set up API routes."""
-        
-        @self.app.get("/health")
+        app = self.app
+
+        @app.get("/health")
         async def health_check():
-            """Health check endpoint."""
             return {"status": "healthy", "agent_id": self.agent_id}
-        
-        @self.app.get("/stats")
+
+        @app.get("/stats")
         async def get_stats():
-            """Get task statistics."""
-            return {
-                "processor": await self.processor.get_stats(),
-                "store": await self.store.get_stats(),
-                "analyzer": await self.analyzer.get_stats(),
-                "automation": await self.automation.get_stats()
-            }
-        
-        @self.app.post("/tasks")
+            stats = {}
+            if self.processor:
+                stats["processor"] = await self.processor.get_stats()
+            if self.store:
+                stats["store"] = await self.store.get_stats()
+            if self.analyzer:
+                stats["analyzer"] = await self.analyzer.get_stats()
+            if self.automation:
+                stats["automation"] = await self.automation.get_stats()
+            return stats
+
+        @app.post("/tasks")
         async def create_task(task: TaskData):
-            """Create a new task."""
             try:
-                # Process task
-                processed_task = await self.processor.process_task(task.dict())
-                
-                # Store task
-                task_id = await self.store.store_task(processed_task)
-                
-                # Analyze task
-                analysis = await self.analyzer.analyze_task(processed_task)
-                
-                # Check for automation opportunities
-                automation_result = await self.automation.check_automation(processed_task)
-                
-                # Update agent state
+                data = task.dict() if hasattr(task, "dict") else task
+                processed = await self.processor.process_task(data) if self.processor else data
+                analysis = await self.analyzer.analyze_task(processed) if self.analyzer else {}
+                automation_result = await self.automation.check_automation(processed) if self.automation else {}
                 await self._update_state()
-                
                 return {
-                    "task_id": task_id,
+                    "task_id": processed.get("id"),
+                    "task": processed,
                     "analysis": analysis,
-                    "automation": automation_result
+                    "automation": automation_result,
                 }
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.get("/tasks/{task_id}")
+
+        @app.get("/tasks/{task_id}")
         async def get_task(task_id: str):
-            """Get a specific task."""
-            try:
-                task = await self.store.get_task(task_id)
-                if not task:
-                    raise HTTPException(status_code=404, detail="Task not found")
-                return task
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.post("/tasks/search")
+            if not self.store:
+                raise HTTPException(status_code=503, detail="Store not available")
+            task = await self.store.get_task(task_id)
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            return task
+
+        @app.post("/tasks/search")
         async def search_tasks(query: TaskQuery):
-            """Search tasks."""
-            try:
-                return await self.store.search_tasks(query.dict(exclude_none=True))
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.get("/tasks/current")
+            if not self.store:
+                return []
+            q = query.dict(exclude_none=True) if hasattr(query, "dict") else query
+            return await self.store.search_tasks(q)
+
+        @app.get("/tasks/current")
         async def get_current_tasks():
-            """Get current tasks."""
-            try:
-                return await self.processor.get_current_tasks()
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.get("/automation/rules")
-        async def get_automation_rules():
-            """Get automation rules."""
-            try:
-                return await self.automation.get_rules()
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.post("/automation/rules")
-        async def add_automation_rule(rule: Dict):
-            """Add automation rule."""
-            try:
-                return await self.automation.add_rule(rule)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-    
+            if not self.processor:
+                return {}
+            return await self.processor.get_current_tasks()
+
     async def initialize(self):
-        """Initialize the Task Agent."""
         await super().initialize()
-        
-        # Initialize components
-        await self.processor.initialize()
-        await self.store.initialize()
-        await self.analyzer.initialize()
-        await self.automation.initialize()
-        
-        # Connect to other agents
-        await self._connect_to_agents()
-        
+        if self.store:
+            await self.store.initialize()
+        if self.processor:
+            await self.processor.initialize()
+        if self.analyzer:
+            await self.analyzer.initialize()
+        if self.automation:
+            await self.automation.initialize()
         logger.info("Task Agent initialized")
-    
+
     async def shutdown(self):
-        """Shutdown the Task Agent."""
         await super().shutdown()
-        
-        # Shutdown components
-        await self.processor.shutdown()
-        await self.store.shutdown()
-        await self.analyzer.shutdown()
-        await self.automation.shutdown()
-        
+        if self.processor:
+            await self.processor.shutdown()
+        if self.store:
+            await self.store.shutdown()
+        if self.analyzer:
+            await self.analyzer.shutdown()
+        if self.automation:
+            await self.automation.shutdown()
         logger.info("Task Agent shut down")
-    
-    async def _connect_to_agents(self):
-        """Connect to other agents."""
-        # Connect to Memory Agent
-        memory_agent_url = settings.MEMORY_AGENT_URL
-        await self._establish_connection("memory_agent", memory_agent_url)
-        
-        # Connect to Emotion Agent
-        emotion_agent_url = settings.EMOTION_AGENT_URL
-        await self._establish_connection("emotion_agent", emotion_agent_url)
-    
-    async def _process_messages(self):
-        """Process incoming messages."""
-        # Process messages from communication bus
-        pass
-    
+
+    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Called by orchestrator agent_manager."""
+        action = task.get("action", "")
+        input_data = task.get("input_data", {})
+        user_id = task.get("user_id")
+
+        if action in ("create", "add"):
+            task_data = {
+                "title": input_data.get("title", "New Task"),
+                "description": input_data.get("description", ""),
+                "priority": input_data.get("priority", 1),
+                "status": "pending",
+                "due_date": input_data.get("due_date"),
+                "tags": input_data.get("tags", []),
+                "assigned_to": user_id,
+            }
+            if self.processor:
+                processed = await self.processor.process_task(task_data)
+                return {"status": "created", "task_id": processed["id"], "task": processed}
+            return {"status": "created", "task_id": str(uuid.uuid4()), "task": task_data}
+
+        if action in ("list", "get_all"):
+            if self.store:
+                query = {}
+                if input_data.get("status"):
+                    query["status"] = input_data["status"]
+                tasks = await self.store.search_tasks(query)
+                return {"tasks": tasks, "count": len(tasks)}
+            if self.processor:
+                current = await self.processor.get_current_tasks()
+                return {"tasks": list(current.values()), "count": len(current)}
+            return {"tasks": [], "count": 0}
+
+        if action in ("update", "complete"):
+            task_id = input_data.get("task_id", "")
+            status = input_data.get("status", "completed")
+            if self.processor:
+                success = await self.processor.update_task_status(task_id, status)
+                return {"status": "updated" if success else "not_found", "task_id": task_id}
+            return {"status": "updated", "task_id": task_id}
+
+        if action == "search":
+            query = input_data.get("query", {})
+            if self.store:
+                tasks = await self.store.search_tasks(query)
+                return {"tasks": tasks, "count": len(tasks)}
+            return {"tasks": [], "count": 0}
+
+        # Default: return current task stats
+        stats = await self.processor.get_stats() if self.processor else {}
+        return {"status": "ok", "stats": stats}
+
     async def _update_state(self):
-        """Update agent state."""
-        # Update state with component statistics
+        task_count = 0
+        if self.store:
+            try:
+                task_count = await self.store.get_task_count()
+            except Exception:
+                pass
         self.state.update({
-            "current_tasks": await self.processor.get_current_tasks(),
-            "task_count": await self.store.get_task_count(),
-            "analysis": await self.analyzer.get_analysis(),
-            "automation": await self.automation.get_stats(),
-            "last_updated": datetime.utcnow().isoformat()
+            "task_count": task_count,
+            "last_updated": datetime.utcnow().isoformat(),
         })
-    
-    async def _process_tasks(self):
-        """Process tasks based on incoming data."""
-        # Process tasks and update state
-        pass
-    
-    async def _maintain_connections(self):
-        """Maintain connections with other agents."""
-        # Maintain connections with other agents
-        pass
 
-# FastAPI application
-app = FastAPI(
-    title="Task Agent API",
-    description="API for the Task Agent in the Virtual Brain System",
-    version="1.0.0"
-)
 
-# Global agent instance
-task_agent = None
+# ─── Standalone FastAPI app ───────────────────────────────────────────────────
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the task agent on startup."""
-    global task_agent
-    task_agent = TaskAgent()
-    await task_agent.initialize()
+if FastAPI:
+    app = FastAPI(
+        title="Task Agent API",
+        description="Task management agent for the AI Virtual Brain System",
+        version="1.0.0",
+    )
+    _task_agent: Optional[TaskAgent] = None
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Shutdown the task agent on shutdown."""
-    if task_agent:
-        await task_agent.shutdown()
+    @app.on_event("startup")
+    async def startup_event():
+        global _task_agent
+        _task_agent = TaskAgent()
+        await _task_agent.initialize()
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host=settings.TASK_AGENT_HOST,
-        port=settings.TASK_AGENT_PORT,
-        reload=settings.DEBUG
-    ) 
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        if _task_agent:
+            await _task_agent.shutdown()

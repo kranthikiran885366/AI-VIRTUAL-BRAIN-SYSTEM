@@ -1,20 +1,67 @@
-import { streamText, convertToModelMessages, tool, Output } from "ai"
+import { streamText, convertToModelMessages, tool } from "ai"
+import { createOpenAI } from "@ai-sdk/openai"
 import { z } from "zod"
 import { redis, CACHE_KEYS, CACHE_TTL } from "@/lib/cache"
 import { brainService, AGENT_REGISTRY, type AgentName, initBrainService } from "@/lib/brain-service"
-import { 
-  getOrCreateUser, 
+import {
+  getOrCreateUser,
   createMessage,
   getConversation,
   updateConversation,
   createMemory,
   createTask,
-  createAgent,
   logAgentActivity,
   generateId,
   getUserMemories,
   searchMemories,
+  createConversation,
 } from "@/lib/server/db-utils"
+
+// ─── Provider Setup ───────────────────────────────────────────────────────────
+
+function getAIProvider(modelId: string) {
+  const apiKey = process.env.OPENAI_API_KEY
+  const baseURL = process.env.OPENAI_BASE_URL
+
+  if (!apiKey || apiKey === "your-openai-api-key-here") {
+    throw new Error(
+      "OPENAI_API_KEY is not configured. Set it in .env.local. " +
+      "Get a key from https://platform.openai.com or https://openrouter.ai"
+    )
+  }
+
+  const openai = createOpenAI({
+    apiKey,
+    ...(baseURL ? { baseURL } : {}),
+  })
+
+  // Normalize model id — strip provider prefix if present (e.g. "openai/gpt-4o" → "gpt-4o")
+  const normalizedModel = modelId.includes("/") ? modelId.split("/").slice(1).join("/") : modelId
+  return openai(normalizedModel)
+}
+
+// ─── Per-user rate limiting (in-memory, resets on server restart) ─────────────
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_PER_MINUTE || "20", 10)
+const RATE_LIMIT_WINDOW_MS = 60_000
+
+function checkRateLimit(userId: string): { allowed: boolean; remaining: number } {
+  const now = Date.now()
+  const entry = rateLimitMap.get(userId)
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(userId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 }
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return { allowed: false, remaining: 0 }
+  }
+
+  entry.count++
+  return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count }
+}
 
 /**
  * Advanced AI Virtual Brain Chat API
@@ -442,13 +489,27 @@ const brainTools = {
 export async function POST(req: Request) {
   initBrainService()
   const startTime = Date.now()
+
+  // Validate AI provider is configured before doing anything else
+  let aiModel: ReturnType<typeof getAIProvider>
+  try {
+    aiModel = getAIProvider("gpt-4o") // will be overridden below after parsing body
+  } catch (configError) {
+    return new Response(
+      JSON.stringify({
+        error: "AI provider not configured",
+        details: configError instanceof Error ? configError.message : "Missing OPENAI_API_KEY",
+      }),
+      { status: 503, headers: { "Content-Type": "application/json" } }
+    )
+  }
   
   try {
-    const { messages, conversationId, userId, model = "openai/gpt-4o" } = await req.json()
+    const { messages, conversationId, userId, model = "gpt-4o" } = await req.json()
     
     // Get or create user (using provided userId or generate one)
     const currentUserId = userId || generateId()
-    const user = getOrCreateUser(currentUserId, "user@example.com", "AI User")
+    const user = getOrCreateUser(currentUserId, `user-${currentUserId}@brain.local`, "AI User")
     
     if (!user) {
       return new Response(
@@ -456,6 +517,25 @@ export async function POST(req: Request) {
         { status: 401, headers: { "Content-Type": "application/json" } }
       )
     }
+
+    // Rate limiting per user
+    const rateCheck = checkRateLimit((user as any).id)
+    if (!rateCheck.allowed) {
+      return new Response(
+        JSON.stringify({ error: "Rate limit exceeded. Try again in a minute.", remaining: 0 }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "X-RateLimit-Remaining": "0",
+            "Retry-After": "60",
+          },
+        }
+      )
+    }
+
+    // Build the real AI model instance for this request
+    aiModel = getAIProvider(model)
 
     // Extract the last user message content
     const lastMessage = messages[messages.length - 1]
@@ -499,9 +579,9 @@ ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: 
     // Prepare conversation context (last 15 messages)
     const conversationContext = messages.slice(-15)
 
-    // Stream the response using AI SDK
+    // Stream the response using AI SDK with real provider
     const result = streamText({
-      model,
+      model: aiModel,
       system: systemPrompt,
       messages: await convertToModelMessages(conversationContext),
       tools: brainTools,
@@ -592,9 +672,6 @@ ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: 
     )
   }
 }
-
-// Import conversation creation from db-utils
-const { createConversation } = require("@/lib/db-utils")
 
 // GET endpoint to get agent info
 export async function GET() {

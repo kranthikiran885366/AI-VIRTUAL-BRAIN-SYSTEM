@@ -4,26 +4,67 @@ from typing import Dict, Any, Optional, List
 import yaml
 from pathlib import Path
 from datetime import datetime
-import numpy as np
 import os
 
-from structlog import get_logger
+try:
+    from structlog import get_logger
+except ImportError:
+    def get_logger(): return logging.getLogger(__name__)
+
+try:
+    from agents.base_agent import BaseAgent
+except ImportError:
+    try:
+        from ..base_agent import BaseAgent  # type: ignore
+    except ImportError:
+        class BaseAgent:  # type: ignore
+            def __init__(self, agent_id: str = "", agent_type: str = "", **_):
+                self.agent_id = agent_id
+                self.agent_type = agent_type
+                self.state: dict = {}
+                self.memory: list = []
+                self.emotions: dict = {}
+                self.connections: dict = {}
+            async def initialize(self): pass
+            async def shutdown(self): pass
 
 from .knowledge_updater import KnowledgeUpdater
-from .error_correction import ErrorCorrector
-from .self_improvement import SelfImprovement
 from .knowledge_base import KnowledgeBase
 from .learning_processor import LearningProcessor
 from .experience_manager import ExperienceManager
 from .adaptation_engine import AdaptationEngine
 
+# Optional modules — stub if missing
+try:
+    from .error_correction import ErrorCorrector
+except ImportError:
+    class ErrorCorrector:
+        def __init__(self, config): pass
+        async def start(self): pass
+        async def stop(self): pass
+        async def check_and_correct(self): return []
+        async def check_experience(self, exp): pass
+        async def get_status(self): return {"status": "stub"}
+
+try:
+    from .self_improvement import SelfImprovement
+except ImportError:
+    class SelfImprovement:
+        def __init__(self, config): pass
+        async def start(self): pass
+        async def stop(self): pass
+        async def analyze(self): return []
+        async def analyze_experience(self, exp): pass
+        async def get_status(self): return {"status": "stub"}
+
 logger = get_logger()
 
-class LearningAgent:
+class LearningAgent(BaseAgent):
     """Main learning agent that coordinates learning activities and knowledge management."""
     
     def __init__(self, config_path: str = "config.yaml"):
         """Initialize the learning agent."""
+        super().__init__(agent_id="learning_agent", agent_type="learning")
         # Set up logging
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
@@ -66,21 +107,35 @@ class LearningAgent:
             self.logger.error(f"Error loading configuration: {e}")
             return {}
     
+    async def initialize(self):
+        """Initialize the learning agent — satisfies BaseAgent/orchestrator contract."""
+        await super().initialize()
+        self.knowledge_updater = KnowledgeUpdater(self.config)
+        self.error_corrector = ErrorCorrector(self.config)
+        self.self_improvement = SelfImprovement(self.config)
+        self.knowledge_base = KnowledgeBase(self.config)
+        self.learning_processor = LearningProcessor(self.config)
+        self.experience_manager = ExperienceManager(self.config)
+        self.adaptation_engine = AdaptationEngine(self.config)
+        self.state.update({
+            "status": "active",
+            "total_learning_cycles": 0,
+            "knowledge_domains": [],
+        })
+        logger.info(f"LearningAgent '{self.agent_id}' initialized")
+
     async def start(self):
         """Start the learning agent."""
         logger.info("Starting learning agent...")
-        
         try:
-            # Start components
             await self.knowledge_updater.start()
             await self.error_corrector.start()
             await self.self_improvement.start()
-            
-            # Start learning loop
-            asyncio.create_task(self._learning_loop())
-            
+            # Track the loop task so it can be cancelled on shutdown
+            self._learning_loop_task = self.create_managed_task(
+                self._learning_loop(), name="learning_agent.loop"
+            )
             logger.info("Learning agent started successfully")
-            
         except Exception as e:
             logger.error(f"Failed to start learning agent: {e}")
             raise
@@ -93,34 +148,36 @@ class LearningAgent:
         await self.knowledge_updater.stop()
         await self.error_corrector.stop()
         await self.self_improvement.stop()
+        await super().shutdown()
         
         logger.info("Learning agent stopped successfully")
+
+    async def shutdown(self):
+        """Alias for stop() — satisfies orchestrator shutdown contract."""
+        await self.stop()
     
     async def _learning_loop(self):
-        """Main learning loop."""
-        while True:
+        """Main learning loop — exits cleanly when agent shuts down."""
+        while not self._shutdown:
             try:
-                # Update knowledge base
                 update_success = await self.knowledge_updater.update()
                 if update_success:
                     self.metrics["successful_updates"] += 1
                 else:
                     self.metrics["failed_updates"] += 1
-                
-                # Check for and correct errors
+
                 corrections = await self.error_corrector.check_and_correct()
                 self.metrics["error_corrections"] += len(corrections)
-                
-                # Look for self-improvement opportunities
+
                 improvements = await self.self_improvement.analyze()
                 self.metrics["improvement_suggestions"] += len(improvements)
-                
-                # Update metrics
+
                 self.metrics["total_learning_cycles"] += 1
-                
-                # Wait for next cycle
+
                 await asyncio.sleep(self.config.get("learning_interval", 300))
-                
+
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.error(f"Error in learning loop: {e}")
                 await asyncio.sleep(5)
@@ -233,7 +290,7 @@ class LearningAgent:
     async def get_status(self) -> Dict[str, Any]:
         """Get the current status of the learning agent."""
         return {
-            "status": "running" if self.is_running else "stopped",
+            "status": "running",
             "metrics": self.metrics,
             "components": {
                 "knowledge_updater": await self.knowledge_updater.get_status(),
@@ -241,6 +298,32 @@ class LearningAgent:
                 "self_improvement": await self.self_improvement.get_status()
             }
         }
+
+    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Called by orchestrator agent_manager — async dispatch."""
+        action = task.get("action", "")
+        input_data = task.get("input_data", {})
+
+        if action in ("learn", "update", "process"):
+            domain = input_data.get("domain", "general")
+            information = input_data.get("information", input_data.get("content", ""))
+            if domain and information:
+                result = self.learn({"domain": domain, "information": information,
+                                     "source": input_data.get("source", "user")})
+                return {"status": "learned", "result": result}
+            return {"status": "skipped", "reason": "missing domain or information"}
+
+        if action in ("get_knowledge", "recall"):
+            domain = input_data.get("domain")
+            knowledge = self.get_knowledge(domain)
+            return {"status": "ok", "knowledge": knowledge}
+
+        if action == "metrics":
+            return {"status": "ok", "metrics": self.get_learning_metrics()}
+
+        return {"status": "ok", "metrics": self.metrics,
+                "learning_state": {k: list(v) if isinstance(v, set) else v
+                                   for k, v in self.learning_state.items()}}
     
     async def get_metrics(self) -> Dict[str, Any]:
         """Get learning metrics."""

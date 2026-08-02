@@ -1,0 +1,42 @@
+[
+  {
+    "type": "concept",
+    "content": "Zero-trust architecture: verify every request as if the network is already breached",
+    "category": "solutions"
+  },
+  {
+    "type": "concept",
+    "content": "Event-driven, serverless architectures that scale to zero when idle",
+    "category": "advancements"
+  },
+  {
+    "type": "concept",
+    "content": "Federated learning: train models on-device without centralising sensitive data",
+    "category": "advancements"
+  },
+  {
+    "type": "approach",
+    "content": "Apply GitOps: treat all infrastructure and configuration as version-controlled code",
+    "category": "applications"
+  },
+  {
+    "type": "approach",
+    "content": "Use strangler-fig pattern for zero-downtime legacy system migration",
+    "category": "solutions"
+  },
+  {
+    "type": "approach",
+    "content": "Design for observability-first: metrics, logs, and traces from day one",
+    "category": "applications"
+  },
+  {
+    "type": "implementation",
+    "content": "Implement circuit-breaker and bulkhead patterns to isolate failure domains",
+    "category": "solutions"
+  },
+  {
+    "type": "implementation",
+    "content": "Deploy feature flags to decouple release from deployment and reduce rollout risk",
+    "category": "advancements"
+  }
+]

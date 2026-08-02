@@ -1,0 +1,42 @@
+[
+  {
+    "type": "concept",
+    "content": "Quantum superposition as a metaphor for holding multiple hypotheses in parallel",
+    "category": "principles"
+  },
+  {
+    "type": "concept",
+    "content": "Network theory: understand systems by mapping edges (relationships) not just nodes",
+    "category": "theories"
+  },
+  {
+    "type": "concept",
+    "content": "Entropy and information theory applied to decision-making under uncertainty",
+    "category": "principles"
+  },
+  {
+    "type": "approach",
+    "content": "Apply the scientific method: form falsifiable hypotheses before building solutions",
+    "category": "theories"
+  },
+  {
+    "type": "approach",
+    "content": "Use Occam's Razor: prefer the simplest model that explains the observed data",
+    "category": "principles"
+  },
+  {
+    "type": "approach",
+    "content": "Run controlled experiments (A/B tests) to isolate causal variables",
+    "category": "discoveries"
+  },
+  {
+    "type": "implementation",
+    "content": "Implement Bayesian updating: revise beliefs continuously as new evidence arrives",
+    "category": "principles"
+  },
+  {
+    "type": "implementation",
+    "content": "Design feedback loops modelled on homeostatic biological systems",
+    "category": "discoveries"
+  }
+]

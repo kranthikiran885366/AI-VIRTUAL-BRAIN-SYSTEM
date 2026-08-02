@@ -1,16 +1,30 @@
 import asyncio
 import logging
-import psutil
+import os
 import time
+
+try:
+    import psutil
+    _PSUTIL_AVAILABLE = True
+except ImportError:
+    psutil = None  # type: ignore
+    _PSUTIL_AVAILABLE = False
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import json
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from structlog import get_logger
+try:
+    from structlog import get_logger
+except ImportError:
+    def get_logger():  # type: ignore
+        return logging.getLogger(__name__)
 
-from .config import settings
+try:
+    from .config import settings
+except ImportError:
+    settings = None  # type: ignore
 
 logger = get_logger()
 
@@ -39,6 +53,7 @@ class HealthMonitor:
         """Initialize the health monitor with configuration."""
         self.config = config
         self.is_running = False
+        self._monitor_task: Optional[asyncio.Task] = None
         
         # Initialize metrics storage
         self.metrics_history: List[HealthMetrics] = []
@@ -65,7 +80,8 @@ class HealthMonitor:
         self.is_running = True
         
         # Start monitoring loop
-        asyncio.create_task(self._monitor_loop())
+        if not self._monitor_task or self._monitor_task.done():
+            self._monitor_task = asyncio.create_task(self._monitor_loop())
         
         logger.info("Health monitor started successfully")
     
@@ -73,6 +89,12 @@ class HealthMonitor:
         """Stop the health monitor."""
         logger.info("Stopping health monitor...")
         self.is_running = False
+        if self._monitor_task:
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
         
         # Save metrics history
         await self._save_metrics_history()
@@ -85,51 +107,53 @@ class HealthMonitor:
             try:
                 # Collect metrics
                 metrics = await self._collect_metrics()
-                
+
                 # Update metrics history
                 self.metrics_history.append(metrics)
                 if len(self.metrics_history) > self.max_history_size:
                     self.metrics_history.pop(0)
-                
+
                 # Check health status
                 await self._check_health_status(metrics)
-                
+
                 # Wait for next collection
                 await asyncio.sleep(self.config.get("collection_interval", 60))
-                
+
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.error(f"Error in monitoring loop: {e}")
                 await asyncio.sleep(5)
     
     async def _collect_metrics(self) -> HealthMetrics:
-        """Collect system metrics."""
+        """Collect system metrics — gracefully degrades when psutil is unavailable."""
         try:
-            # CPU metrics
-            cpu_usage = psutil.cpu_percent(interval=1)
-            
-            # Memory metrics
-            memory = psutil.virtual_memory()
-            memory_usage = memory.percent
-            
-            # Disk metrics
-            disk = psutil.disk_usage('/')
-            disk_usage = disk.percent
-            
-            # Network metrics
-            net_io = psutil.net_io_counters()
-            network_io = {
-                "bytes_sent": net_io.bytes_sent,
-                "bytes_recv": net_io.bytes_recv,
-                "packets_sent": net_io.packets_sent,
-                "packets_recv": net_io.packets_recv
-            }
-            
-            # Process metrics
-            process_count = len(psutil.pids())
-            
-            # System uptime
-            uptime = time.time() - psutil.boot_time()
-            
+            if _PSUTIL_AVAILABLE:
+                cpu_usage = psutil.cpu_percent(interval=1)
+                memory = psutil.virtual_memory()
+                memory_usage = memory.percent
+                try:
+                    disk = psutil.disk_usage("/")
+                    disk_usage = disk.percent
+                except Exception:
+                    disk_usage = 0.0
+                net_io = psutil.net_io_counters()
+                network_io = {
+                    "bytes_sent": net_io.bytes_sent,
+                    "bytes_recv": net_io.bytes_recv,
+                    "packets_sent": net_io.packets_sent,
+                    "packets_recv": net_io.packets_recv,
+                }
+                process_count = len(psutil.pids())
+                uptime = time.time() - psutil.boot_time()
+            else:
+                cpu_usage = 0.0
+                memory_usage = 0.0
+                disk_usage = 0.0
+                network_io = {"bytes_sent": 0, "bytes_recv": 0, "packets_sent": 0, "packets_recv": 0}
+                process_count = 0
+                uptime = time.time()
+
             return HealthMetrics(
                 cpu_usage=cpu_usage,
                 memory_usage=memory_usage,
@@ -137,9 +161,9 @@ class HealthMonitor:
                 network_io=network_io,
                 process_count=process_count,
                 uptime=uptime,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
             )
-            
+
         except Exception as e:
             logger.error(f"Error collecting metrics: {e}")
             raise
@@ -181,10 +205,15 @@ class HealthMonitor:
         logger.warning(f"Health alert: {metric_name} = {value} (threshold: {alert['threshold']})")
     
     async def _save_metrics_history(self):
-        """Save metrics history to file."""
+        """Save metrics history to file with safe datetime serialization."""
         try:
+            os.makedirs("logs", exist_ok=True)
+            def _default(obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
             with open("logs/metrics_history.json", "w") as f:
-                json.dump([asdict(m) for m in self.metrics_history], f, indent=2)
+                json.dump([asdict(m) for m in self.metrics_history], f, indent=2, default=_default)
         except Exception as e:
             logger.error(f"Failed to save metrics history: {e}")
     
@@ -192,7 +221,7 @@ class HealthMonitor:
         """Get current health status."""
         if not self.metrics_history:
             return {
-                "status": HealthStatus.UNKNOWN,
+                "status": HealthStatus.UNKNOWN.value,
                 "last_update": None,
                 "metrics": None,
                 "alerts": self.alerts
@@ -219,7 +248,7 @@ class HealthMonitor:
             status = HealthStatus.CRITICAL
         
         return {
-            "status": status,
+            "status": status.value,
             "last_update": latest_metrics.timestamp.isoformat(),
             "metrics": asdict(latest_metrics),
             "alerts": self.alerts

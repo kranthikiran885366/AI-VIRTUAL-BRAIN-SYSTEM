@@ -1,327 +1,281 @@
-import logging
-import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
-import yaml
-from pathlib import Path
+"""
+IntentDetector — Production implementation with lazy imports.
+
+Backends (in priority order):
+  1. Rasa NLU HTTP API  — calls running Rasa server /model/parse
+  2. HuggingFace zero-shot classification (cross-encoder/nli-base-chunk-v1)
+  3. Keyword-match rule engine (no ML dependency)
+"""
+
 import asyncio
+import logging
 import queue
 import threading
-import json
-import requests
-from rasa.core.agent import Agent
-from rasa.core.interpreter import RasaNLUInterpreter
-import torch
-import torchaudio
-from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+import time as _time
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+    np = None  # type: ignore
+
+_DEFAULT_INTENTS = [
+    "greeting", "farewell", "help_request", "information_request",
+    "task_creation", "task_query", "memory_recall", "memory_store",
+    "emotion_expression", "affirmation", "negation", "question",
+    "command", "feedback", "complaint",
+]
+
+_KEYWORD_MAP: Dict[str, List[str]] = {
+    "greeting":           ["hello", "hi", "hey", "good morning", "good evening", "howdy"],
+    "farewell":           ["bye", "goodbye", "see you", "later", "take care"],
+    "help_request":       ["help", "assist", "support", "how do i", "can you"],
+    "information_request":["what", "when", "where", "who", "explain", "tell me"],
+    "task_creation":      ["create", "add", "set", "make", "schedule", "remind"],
+    "task_query":         ["list", "show", "what tasks", "my tasks", "pending"],
+    "memory_recall":      ["remember", "recall", "what did", "last time"],
+    "memory_store":       ["remember this", "don't forget", "save", "note that"],
+    "emotion_expression": ["feel", "feeling", "i am", "i'm sad", "happy", "anxious"],
+    "affirmation":        ["yes", "yeah", "sure", "ok", "okay", "correct", "right"],
+    "negation":           ["no", "nope", "not", "never", "don't", "won't"],
+    "question":           ["?", "could you", "would you", "is it", "are you"],
+    "command":            ["do", "run", "execute", "start", "stop", "open", "close"],
+    "feedback":           ["good job", "well done", "nice", "great", "perfect"],
+    "complaint":          ["wrong", "bad", "error", "failed", "broken", "issue"],
+}
+
 
 class IntentDetector:
-    def __init__(self, config_path: str = "config/ear_agent_config.yaml"):
+    """Detects user intent from text or raw audio."""
+
+    def __init__(self, config: Dict[str, Any]):
         self.logger = logging.getLogger(__name__)
-        self.config = self._load_config(config_path)
-        self.intent_config = self.config.get("intent_detection", {})
-        
-        # Initialize intent detection parameters
-        self.model = self.intent_config.get("model", "rasa")
-        self.supported_intents = self.intent_config.get("supported_intents", [])
-        self.confidence_threshold = self.intent_config.get("confidence_threshold", 0.6)
-        self.rasa_endpoint = self.intent_config.get("rasa_endpoint", "http://localhost:5005")
-        
-        # Initialize components
-        self.interpreter = None
-        self.agent = None
-        self.processor = None
-        self.classifier = None
-        self.processing_queue = queue.Queue()
-        self.is_processing = False
-        self.processing_thread = None
-        
-        # Load model
+        self.config = config
+        intent_cfg = config.get("intent_detection", {})
+
+        self.model_name: str = intent_cfg.get("model", "rasa")
+        self.supported_intents: List[str] = intent_cfg.get("supported_intents", _DEFAULT_INTENTS)
+        self.confidence_threshold: float = float(intent_cfg.get("confidence_threshold", 0.5))
+        self.rasa_endpoint: str = intent_cfg.get("rasa_endpoint", "http://localhost:5005")
+        self.sample_rate: int = int(config.get("audio", {}).get("sample_rate", 16000))
+
+        self._backend: str = "keyword"
+        self._zsc_pipeline = None
+
+        self.processing_queue: queue.Queue = queue.Queue()
+        self._text_queue: queue.Queue = queue.Queue()
+        self.is_processing: bool = False
+        self.processing_thread: Optional[threading.Thread] = None
+
         self._initialize_model()
-    
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file"""
-        try:
-            config_file = Path(config_path)
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    return yaml.safe_load(f)
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading config: {e}")
-            return {}
-    
+
+    # ─── Model Initialization ─────────────────────────────────────────────────
+
     def _initialize_model(self):
-        """Initialize intent detection model"""
-        try:
-            if self.model == "rasa":
-                # Load Rasa model
-                model_path = "models/rasa"
-                if not Path(model_path).exists():
-                    raise ValueError(f"Rasa model not found at {model_path}")
-                
-                self.interpreter = RasaNLUInterpreter(model_path)
-                self.agent = Agent.load(model_path)
-                self.logger.info("Initialized Rasa intent detection model")
-            
-            elif self.model == "wav2vec2":
-                # Load Wav2Vec2 model and processor
-                self.processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
-                self.classifier = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
-                self.logger.info("Initialized Wav2Vec2 intent detection model")
-            
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
-        except Exception as e:
-            self.logger.error(f"Error initializing intent detection model: {e}")
-            raise
-    
-    async def detect_intent(self, audio_data: np.ndarray, sample_rate: int = 16000) -> List[Dict[str, Any]]:
-        """Detect intent in audio data"""
-        try:
-            if self.model == "rasa":
-                return await self._detect_rasa(audio_data, sample_rate)
-            elif self.model == "wav2vec2":
-                return await self._detect_wav2vec2(audio_data, sample_rate)
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
-        except Exception as e:
-            self.logger.error(f"Error detecting intent: {e}")
+        if self.model_name in ("auto", "transformers", "zsc"):
+            try:
+                from transformers import pipeline as hf_pipeline
+                self._zsc_pipeline = hf_pipeline(
+                    "zero-shot-classification",
+                    model="cross-encoder/nli-base-chunk-v1",
+                    device=-1,
+                )
+                self._backend = "zsc"
+                self.logger.info("IntentDetector: loaded zero-shot classification model")
+                return
+            except Exception as e:
+                self.logger.warning(f"IntentDetector: ZSC model load failed — {e}")
+
+        if self.model_name == "rasa":
+            self._backend = "rasa"
+            self.logger.info(f"IntentDetector: using Rasa API at {self.rasa_endpoint}")
+            return
+
+        self._backend = "keyword"
+        self.logger.info("IntentDetector: using keyword-match fallback")
+
+    # ─── Main Detection APIs ──────────────────────────────────────────────────
+
+    async def detect_from_text(self, text: str) -> List[Dict[str, Any]]:
+        if not text or not text.strip():
             return []
-    
-    async def _detect_rasa(self, audio_data: np.ndarray, sample_rate: int) -> List[Dict[str, Any]]:
-        """Detect intent using Rasa"""
+        text = text.strip()
         try:
-            # Convert audio to text using speech recognition
-            # This is a placeholder - in practice, you'd use a speech recognition model
-            text = "This is a placeholder text for intent detection"
-            
-            # Get predictions from Rasa
-            response = requests.post(
-                f"{self.rasa_endpoint}/model/parse",
-                json={"text": text}
-            )
-            
-            if response.status_code != 200:
-                raise ValueError(f"Rasa API error: {response.text}")
-            
-            result = response.json()
-            
-            # Process results
-            results = []
+            if self._backend == "rasa":
+                return await self._detect_rasa(text)
+            if self._backend == "zsc":
+                return self._detect_zsc(text)
+            return self._detect_keyword(text)
+        except Exception as e:
+            self.logger.error(f"IntentDetector.detect_from_text failed: {e}")
+            return self._detect_keyword(text)
+
+    async def detect_intent(self, audio_data, sample_rate: int = None) -> List[Dict[str, Any]]:
+        self.logger.warning("IntentDetector.detect_intent called with raw audio — transcribe first via SpeechRecognizer")
+        return []
+
+    def add_text(self, text: str):
+        if self.is_processing and text:
+            self._text_queue.put({"text": text, "timestamp": datetime.utcnow().isoformat()})
+
+    def add_audio_data(self, audio_data, timestamp: float):
+        if self.is_processing:
+            self.processing_queue.put({"audio": audio_data, "timestamp": timestamp})
+
+    # ─── Rasa Backend ─────────────────────────────────────────────────────────
+
+    async def _detect_rasa(self, text: str) -> List[Dict[str, Any]]:
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.rasa_endpoint}/model/parse",
+                    json={"text": text},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as response:
+                    if response.status != 200:
+                        raise ValueError(f"Rasa API returned {response.status}: {await response.text()}")
+                    result = await response.json()
+
+            ts = datetime.utcnow().isoformat()
+            results: List[Dict[str, Any]] = []
             for intent in result.get("intent_ranking", []):
-                intent_name = intent.get("name")
-                confidence = float(intent.get("confidence", 0))
-                
-                # Only include supported intents above threshold
-                if intent_name in self.supported_intents and confidence >= self.confidence_threshold:
-                    results.append({
-                        "intent": intent_name,
-                        "confidence": confidence,
-                        "entities": result.get("entities", []),
-                        "timestamp": asyncio.get_event_loop().time()
-                    })
-            
-            # Sort by confidence
-            results.sort(key=lambda x: x["confidence"], reverse=True)
-            
-            return results
-        
-        except Exception as e:
-            self.logger.error(f"Error in Rasa intent detection: {e}")
-            return []
-    
-    async def _detect_wav2vec2(self, audio_data: np.ndarray, sample_rate: int) -> List[Dict[str, Any]]:
-        """Detect intent using Wav2Vec2"""
-        try:
-            # Convert to torch tensor
-            audio_tensor = torch.from_numpy(audio_data).float()
-            
-            # Resample if needed
-            if sample_rate != 16000:
-                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
-                audio_tensor = resampler(audio_tensor)
-            
-            # Process audio
-            inputs = self.processor(
-                audio_tensor,
-                sampling_rate=16000,
-                return_tensors="pt",
-                padding=True
-            )
-            
-            # Get predictions
-            with torch.no_grad():
-                logits = self.classifier(inputs.input_values).logits
-                predicted_ids = torch.argmax(logits, dim=-1)
-                transcription = self.processor.batch_decode(predicted_ids)
-            
-            # Process results
-            results = []
-            for intent in self.supported_intents:
-                # Calculate confidence based on transcription
-                # This is a placeholder - in practice, you'd use a more sophisticated method
-                confidence = 0.8 if intent in transcription[0].lower() else 0.2
-                
+                name = intent.get("name", "")
+                confidence = round(float(intent.get("confidence", 0)), 4)
                 if confidence >= self.confidence_threshold:
                     results.append({
-                        "intent": intent,
+                        "intent": name,
+                        "confidence": confidence,
+                        "entities": result.get("entities", []),
+                        "timestamp": ts,
+                        "backend": "rasa",
+                    })
+            results.sort(key=lambda x: x["confidence"], reverse=True)
+            return results
+        except Exception as e:
+            self.logger.warning(f"IntentDetector: Rasa API failed — {e}. Falling back to keyword.")
+            return self._detect_keyword(text)
+
+    # ─── Zero-Shot Classification Backend ─────────────────────────────────────
+
+    def _detect_zsc(self, text: str) -> List[Dict[str, Any]]:
+        try:
+            candidate_labels = self.supported_intents or _DEFAULT_INTENTS
+            result = self._zsc_pipeline(text, candidate_labels, multi_label=True)
+            ts = datetime.utcnow().isoformat()
+            results = []
+            for label, score in zip(result["labels"], result["scores"]):
+                confidence = round(float(score), 4)
+                if confidence >= self.confidence_threshold:
+                    results.append({
+                        "intent": label,
                         "confidence": confidence,
                         "entities": [],
-                        "timestamp": asyncio.get_event_loop().time()
+                        "timestamp": ts,
+                        "backend": "zsc",
                     })
-            
-            # Sort by confidence
-            results.sort(key=lambda x: x["confidence"], reverse=True)
-            
             return results
-        
         except Exception as e:
-            self.logger.error(f"Error in Wav2Vec2 intent detection: {e}")
-            return []
-    
-    def start_processing(self, callback: Optional[callable] = None):
-        """Start intent detection processing"""
-        try:
-            if self.is_processing:
-                self.logger.warning("Already processing")
-                return
-            
-            self.is_processing = True
-            
-            # Start processing thread
-            self.processing_thread = threading.Thread(
-                target=self._process_queue,
-                args=(callback,) if callback else (),
-                daemon=True
-            )
-            self.processing_thread.start()
-            
-            self.logger.info("Started intent detection processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error starting intent detection: {e}")
-            self.is_processing = False
-            raise
-    
-    def stop_processing(self):
-        """Stop intent detection processing"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.is_processing = False
-            
-            if self.processing_thread:
-                self.processing_thread.join(timeout=5)
-                self.processing_thread = None
-            
-            self.logger.info("Stopped intent detection processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error stopping intent detection: {e}")
-            raise
-    
-    def _process_queue(self, callback: Optional[callable] = None):
-        """Process audio data from queue"""
-        try:
-            while self.is_processing:
-                try:
-                    # Get audio data from queue
-                    audio_data = self.processing_queue.get(timeout=1)
-                    
-                    # Detect intent
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    results = loop.run_until_complete(
-                        self.detect_intent(audio_data["audio"])
-                    )
-                    loop.close()
-                    
-                    # Call callback if provided
-                    if callback and results:
-                        callback({
-                            "results": results,
-                            "timestamp": audio_data["timestamp"]
-                        })
-                    
-                    self.processing_queue.task_done()
-                
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    self.logger.error(f"Error processing audio: {e}")
-        
-        except Exception as e:
-            self.logger.error(f"Error in intent detection thread: {e}")
-    
-    def add_audio_data(self, audio_data: np.ndarray, timestamp: float):
-        """Add audio data to processing queue"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.processing_queue.put({
-                "audio": audio_data,
-                "timestamp": timestamp
-            })
-        
-        except Exception as e:
-            self.logger.error(f"Error adding audio data: {e}")
-    
-    def get_supported_intents(self) -> List[str]:
-        """Get list of supported intents"""
-        return self.supported_intents.copy()
-    
-    def set_confidence_threshold(self, threshold: float):
-        """Set confidence threshold for intent detection"""
-        try:
-            if not 0 <= threshold <= 1:
-                raise ValueError("Confidence threshold must be between 0 and 1")
-            
-            self.confidence_threshold = threshold
-            self.logger.info(f"Set confidence threshold to {threshold}")
-        
-        except Exception as e:
-            self.logger.error(f"Error setting confidence threshold: {e}")
-            raise
-    
-    def cleanup(self):
-        """Clean up resources"""
-        try:
-            self.stop_processing()
-            if self.interpreter:
-                del self.interpreter
-            if self.agent:
-                del self.agent
-            if self.processor:
-                del self.processor
-            if self.classifier:
-                del self.classifier
-        except Exception as e:
-            self.logger.error(f"Error cleaning up intent detector: {e}")
+            self.logger.error(f"IntentDetector: ZSC inference failed: {e}")
+            return self._detect_keyword(text)
 
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Test intent detector
-    async def test_detector():
-        detector = IntentDetector()
-        try:
-            # Test with dummy audio data
-            audio_data = np.zeros(16000, dtype=np.int16)  # 1 second of silence
-            results = await detector.detect_intent(audio_data)
-            print("Intent detection results:")
-            for result in results:
-                print(f"- {result['intent']}: {result['confidence']:.2f}")
-                if result.get("entities"):
-                    print("  Entities:", result["entities"])
-        finally:
-            detector.cleanup()
-    
-    asyncio.run(test_detector()) 
+    # ─── Keyword-Match Fallback ───────────────────────────────────────────────
+
+    def _detect_keyword(self, text: str) -> List[Dict[str, Any]]:
+        lower = text.lower()
+        ts = datetime.utcnow().isoformat()
+        hits: Dict[str, int] = {}
+        for intent, keywords in _KEYWORD_MAP.items():
+            if intent not in (self.supported_intents or _DEFAULT_INTENTS):
+                continue
+            count = sum(1 for kw in keywords if kw in lower)
+            if count > 0:
+                hits[intent] = count
+
+        if not hits:
+            return [{
+                "intent": "unknown",
+                "confidence": 0.30,
+                "entities": [],
+                "timestamp": ts,
+                "backend": "keyword",
+            }]
+
+        total = sum(hits.values())
+        results = [
+            {
+                "intent": intent,
+                "confidence": round(min(0.90, 0.40 + count / total * 0.50), 4),
+                "entities": self._extract_entities(text),
+                "timestamp": ts,
+                "backend": "keyword",
+            }
+            for intent, count in sorted(hits.items(), key=lambda x: x[1], reverse=True)
+        ]
+        return results
+
+    def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        import re
+        entities = []
+        for m in re.finditer(r'\b(\d{1,2}:\d{2}(?:\s?[ap]m)?)\b', text, re.IGNORECASE):
+            entities.append({"entity": "time", "value": m.group(), "start": m.start(), "end": m.end()})
+        for m in re.finditer(r'\b\d+\b', text):
+            entities.append({"entity": "number", "value": m.group(), "start": m.start(), "end": m.end()})
+        for m in re.finditer(r'"([^"]+)"', text):
+            entities.append({"entity": "quoted", "value": m.group(1), "start": m.start(), "end": m.end()})
+        return entities
+
+    # ─── Processing Thread ────────────────────────────────────────────────────
+
+    def start_processing(self, callback: Optional[Callable] = None):
+        if self.is_processing:
+            return
+        self.is_processing = True
+        self.processing_thread = threading.Thread(
+            target=self._processing_loop, args=(callback,), daemon=True
+        )
+        self.processing_thread.start()
+        self.logger.info("IntentDetector: processing thread started")
+
+    def stop_processing(self):
+        self.is_processing = False
+        if self.processing_thread:
+            self.processing_thread.join(timeout=5)
+            self.processing_thread = None
+
+    def _processing_loop(self, callback: Optional[Callable]):
+        while self.is_processing:
+            try:
+                item = self._text_queue.get(timeout=0.5)
+                results = asyncio.run(self.detect_from_text(item["text"]))
+                for r in results:
+                    r["text"] = item["text"]
+                    if callback:
+                        callback(r)
+                self._text_queue.task_done()
+                continue
+            except queue.Empty:
+                pass
+
+            try:
+                self.processing_queue.get(timeout=0.5)
+                self.processing_queue.task_done()
+            except queue.Empty:
+                pass
+            except Exception as e:
+                self.logger.error(f"IntentDetector: processing loop error: {e}")
+
+    def get_supported_intents(self) -> List[str]:
+        return list(self.supported_intents)
+
+    def set_confidence_threshold(self, threshold: float):
+        if not 0 <= threshold <= 1:
+            raise ValueError("Confidence threshold must be between 0 and 1")
+        self.confidence_threshold = threshold
+
+    def cleanup(self):
+        self.stop_processing()
+        self._zsc_pipeline = None

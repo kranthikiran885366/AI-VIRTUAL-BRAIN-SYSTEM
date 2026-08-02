@@ -1,248 +1,212 @@
 import asyncio
 import logging
+import uuid
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from structlog import get_logger
+try:
+    from structlog import get_logger
+except ImportError:
+    def get_logger():
+        return logging.getLogger(__name__)
 
-from .base_agent import BaseAgent
-from ..config import settings
+try:
+    from agents.base_agent import BaseAgent
+except ImportError:
+    from .base_agent import BaseAgent
 
 logger = get_logger()
 
+
 class LearningAgent(BaseAgent):
-    """Agent responsible for learning and adaptation."""
-    
-    def __init__(self, agent_id: str):
-        """Initialize the learning agent."""
+    def __init__(self, agent_id: str = "learning_agent"):
         super().__init__(agent_id, "learning")
         self.knowledge_base: Dict[str, Any] = {}
-        self.learning_patterns: Dict[str, List[Dict]] = {}
-        self.adaptation_history: List[Dict] = []
-        self.learning_rate = 0.1
-        self.max_patterns = 1000
-    
+        self.user_preferences: Dict[str, Any] = {}
+        self.interaction_patterns: List[Dict] = []
+        self.topic_frequency: Dict[str, int] = {}
+        self.adaptation_log: List[Dict] = []
+        self.max_patterns = 2000
+
     async def initialize(self):
-        """Initialize the learning agent."""
         await super().initialize()
-        
-        # Initialize learning-specific state
         self.state.update({
-            "knowledge_base_size": 0,
+            "knowledge_entries": 0,
+            "preference_entries": 0,
             "pattern_count": 0,
             "adaptation_count": 0,
             "last_learning": datetime.utcnow().isoformat(),
-            "success_rate": 0.0
         })
-        
         logger.info(f"Learning agent {self.agent_id} initialized")
-    
-    async def _process_messages(self):
-        """Process incoming messages."""
-        # Process learning-related messages
-        # This would typically involve receiving messages from the communication bus
-        pass
-    
+
     async def _update_state(self):
-        """Update agent state."""
         self.state.update({
-            "knowledge_base_size": len(self.knowledge_base),
-            "pattern_count": len(self.learning_patterns),
-            "last_active": datetime.utcnow().isoformat()
+            "knowledge_entries": len(self.knowledge_base),
+            "preference_entries": len(self.user_preferences),
+            "pattern_count": len(self.interaction_patterns),
+            "adaptation_count": len(self.adaptation_log),
+            "last_active": datetime.utcnow().isoformat(),
         })
-    
+
     async def _process_emotions(self):
-        """Process and update emotions based on learning progress."""
-        # Calculate learning progress
-        recent_adaptations = self.adaptation_history[-10:]  # Last 10 adaptations
-        success_rate = sum(1 for a in recent_adaptations if a["success"]) / len(recent_adaptations) if recent_adaptations else 0.0
-        
-        # Update emotions based on learning success
-        if success_rate > 0.7:
-            await self.update_emotion("happiness", min(1.0, self.emotions["happiness"] + 0.1))
-        elif success_rate < 0.3:
-            await self.update_emotion("frustration", min(1.0, self.emotions["frustration"] + 0.1))
-    
-    async def _maintain_connections(self):
-        """Maintain connections with other agents."""
-        # Check for learning-related connections
-        # This would typically involve communicating with other agents
-        pass
-    
-    async def learn_from_experience(self, experience: Dict):
-        """Learn from a new experience."""
-        # Extract patterns from experience
-        patterns = self._extract_patterns(experience)
-        
-        # Update knowledge base
-        for pattern in patterns:
-            await self._update_knowledge(pattern)
-        
-        # Record adaptation
-        adaptation = {
+        recent = self.adaptation_log[-10:]
+        if not recent:
+            return
+        rate = sum(1 for a in recent if a.get("success", True)) / len(recent)
+        if rate > 0.7:
+            await self.update_emotion("happiness", min(1.0, self.emotions.get("happiness", 0.5) + 0.05))
+        elif rate < 0.3:
+            await self.update_emotion("sadness", min(1.0, self.emotions.get("sadness", 0.0) + 0.05))
+
+    async def learn_from_interaction(self, interaction: Dict) -> Dict:
+        user_message = interaction.get("user_message", "")
+        agent_response = interaction.get("agent_response", "")
+        agent_used = interaction.get("agent_used", "orchestrator_agent")
+        user_id = interaction.get("user_id", "default")
+        feedback = interaction.get("feedback")
+
+        words = user_message.lower().split()
+        for word in words:
+            if len(word) > 4:
+                self.topic_frequency[word] = self.topic_frequency.get(word, 0) + 1
+
+        pattern = {
+            "id": str(uuid.uuid4()),
             "timestamp": datetime.utcnow().isoformat(),
-            "experience_id": experience.get("id"),
-            "patterns": patterns,
-            "success": experience.get("success", True)
+            "user_id": user_id,
+            "message_length": len(user_message),
+            "agent_used": agent_used,
+            "top_words": sorted(words, key=lambda w: self.topic_frequency.get(w, 0), reverse=True)[:5],
+            "feedback": feedback,
         }
-        self.adaptation_history.append(adaptation)
-        
-        # Update state
-        self.state["adaptation_count"] += 1
-        self.state["last_learning"] = datetime.utcnow().isoformat()
-        
-        logger.info(f"Learned from experience: {experience.get('id')}")
-    
-    def _extract_patterns(self, experience: Dict) -> List[Dict]:
-        """Extract learning patterns from an experience."""
-        patterns = []
-        
-        # Extract basic patterns
-        if "action" in experience and "outcome" in experience:
-            pattern = {
-                "type": "action_outcome",
-                "action": experience["action"],
-                "outcome": experience["outcome"],
-                "context": experience.get("context", {}),
-                "confidence": 0.5
-            }
-            patterns.append(pattern)
-        
-        # Extract temporal patterns
-        if "sequence" in experience:
-            pattern = {
-                "type": "temporal",
-                "sequence": experience["sequence"],
-                "duration": experience.get("duration"),
-                "confidence": 0.5
-            }
-            patterns.append(pattern)
-        
-        # Extract causal patterns
-        if "cause" in experience and "effect" in experience:
-            pattern = {
-                "type": "causal",
-                "cause": experience["cause"],
-                "effect": experience["effect"],
-                "confidence": 0.5
-            }
-            patterns.append(pattern)
-        
-        return patterns
-    
-    async def _update_knowledge(self, pattern: Dict):
-        """Update the knowledge base with a new pattern."""
-        pattern_type = pattern["type"]
-        
-        if pattern_type not in self.knowledge_base:
-            self.knowledge_base[pattern_type] = {}
-        
-        # Update pattern in knowledge base
-        if pattern_type == "action_outcome":
-            key = f"{pattern['action']}_{pattern['outcome']}"
-            if key in self.knowledge_base[pattern_type]:
-                # Update existing pattern
-                existing = self.knowledge_base[pattern_type][key]
-                existing["confidence"] = (existing["confidence"] * 0.7 + pattern["confidence"] * 0.3)
-                existing["count"] += 1
+        self.interaction_patterns.append(pattern)
+        if len(self.interaction_patterns) > self.max_patterns:
+            self.interaction_patterns = self.interaction_patterns[-self.max_patterns:]
+
+        if feedback is not None:
+            pref_key = f"{user_id}:{agent_used}"
+            if pref_key not in self.user_preferences:
+                self.user_preferences[pref_key] = {"positive": 0, "negative": 0, "total": 0}
+            self.user_preferences[pref_key]["total"] += 1
+            if feedback > 0:
+                self.user_preferences[pref_key]["positive"] += 1
             else:
-                # Add new pattern
-                pattern["count"] = 1
-                self.knowledge_base[pattern_type][key] = pattern
-        
-        # Update learning patterns
-        if pattern_type not in self.learning_patterns:
-            self.learning_patterns[pattern_type] = []
-        
-        self.learning_patterns[pattern_type].append(pattern)
-        
-        # Maintain pattern limit
-        if len(self.learning_patterns[pattern_type]) > self.max_patterns:
-            self.learning_patterns[pattern_type] = self.learning_patterns[pattern_type][-self.max_patterns:]
-    
-    async def apply_learning(self, situation: Dict) -> Dict:
-        """Apply learned knowledge to a new situation."""
-        result = {
-            "action": None,
-            "confidence": 0.0,
-            "explanation": []
+                self.user_preferences[pref_key]["negative"] += 1
+
+        topic = self._extract_topic(user_message)
+        if topic:
+            if topic not in self.knowledge_base:
+                self.knowledge_base[topic] = {
+                    "first_seen": datetime.utcnow().isoformat(),
+                    "frequency": 0,
+                    "agents_used": [],
+                    "sample_queries": [],
+                }
+            entry = self.knowledge_base[topic]
+            entry["frequency"] += 1
+            entry["last_seen"] = datetime.utcnow().isoformat()
+            if agent_used not in entry["agents_used"]:
+                entry["agents_used"].append(agent_used)
+            if len(entry["sample_queries"]) < 5:
+                entry["sample_queries"].append(user_message[:100])
+
+        adaptation = {
+            "id": str(uuid.uuid4()),
+            "timestamp": datetime.utcnow().isoformat(),
+            "topic": topic,
+            "agent_used": agent_used,
+            "success": feedback is None or feedback > 0,
         }
-        
-        # Find relevant patterns
-        relevant_patterns = self._find_relevant_patterns(situation)
-        
-        if relevant_patterns:
-            # Select best pattern
-            best_pattern = max(relevant_patterns, key=lambda p: p["confidence"])
-            
-            # Apply pattern
-            if best_pattern["type"] == "action_outcome":
-                result["action"] = best_pattern["action"]
-                result["confidence"] = best_pattern["confidence"]
-                result["explanation"].append(f"Based on previous experience with {best_pattern['action']}")
-        
-        return result
-    
-    def _find_relevant_patterns(self, situation: Dict) -> List[Dict]:
-        """Find patterns relevant to the current situation."""
-        relevant_patterns = []
-        
-        # Search in knowledge base
-        for pattern_type, patterns in self.knowledge_base.items():
-            for pattern in patterns.values():
-                if self._is_pattern_relevant(pattern, situation):
-                    relevant_patterns.append(pattern)
-        
-        return relevant_patterns
-    
-    def _is_pattern_relevant(self, pattern: Dict, situation: Dict) -> bool:
-        """Check if a pattern is relevant to the current situation."""
-        if pattern["type"] == "action_outcome":
-            # Check if action is applicable
-            return self._check_action_applicability(pattern["action"], situation)
-        elif pattern["type"] == "temporal":
-            # Check if sequence matches
-            return self._check_sequence_match(pattern["sequence"], situation)
-        elif pattern["type"] == "causal":
-            # Check if cause matches
-            return self._check_cause_match(pattern["cause"], situation)
-        
-        return False
-    
-    def _check_action_applicability(self, action: Dict, situation: Dict) -> bool:
-        """Check if an action is applicable to the current situation."""
-        # Simple implementation - can be enhanced
-        return all(k in situation for k in action.get("requirements", []))
-    
-    def _check_sequence_match(self, sequence: List, situation: Dict) -> bool:
-        """Check if a sequence matches the current situation."""
-        # Simple implementation - can be enhanced
-        return all(s in situation.get("sequence", []) for s in sequence)
-    
-    def _check_cause_match(self, cause: Dict, situation: Dict) -> bool:
-        """Check if a cause matches the current situation."""
-        # Simple implementation - can be enhanced
-        return all(k in situation for k in cause.keys())
-    
-    async def get_learning_stats(self) -> Dict:
-        """Get learning statistics."""
+        self.adaptation_log.append(adaptation)
+        if len(self.adaptation_log) > 500:
+            self.adaptation_log = self.adaptation_log[-500:]
+
+        self.state["last_learning"] = datetime.utcnow().isoformat()
+
         return {
+            "learned": True,
+            "topic": topic,
+            "pattern_id": pattern["id"],
             "knowledge_base_size": len(self.knowledge_base),
-            "pattern_count": sum(len(patterns) for patterns in self.learning_patterns.values()),
-            "adaptation_count": len(self.adaptation_history),
-            "success_rate": self.state["success_rate"],
-            "last_learning": self.state["last_learning"]
+            "top_topics": self._get_top_topics(5),
         }
-    
-    async def clear_learning(self):
-        """Clear all learned knowledge."""
-        self.knowledge_base.clear()
-        self.learning_patterns.clear()
-        self.adaptation_history.clear()
-        self.state.update({
-            "knowledge_base_size": 0,
-            "pattern_count": 0,
-            "adaptation_count": 0,
-            "success_rate": 0.0
+
+    def _extract_topic(self, text: str) -> Optional[str]:
+        topic_map = {
+            "memory": ["remember", "recall", "forget", "memory", "store", "save"],
+            "emotion": ["feel", "emotion", "mood", "sad", "happy", "angry", "anxious"],
+            "task": ["task", "todo", "deadline", "schedule", "reminder", "organize"],
+            "creativity": ["create", "idea", "brainstorm", "design", "story", "imagine"],
+            "planning": ["plan", "goal", "strategy", "roadmap", "milestone", "achieve"],
+            "reasoning": ["analyze", "logic", "reason", "why", "because", "proof"],
+            "social": ["friend", "relationship", "communicate", "people", "social"],
+            "learning": ["learn", "study", "understand", "teach", "knowledge", "skill"],
+            "decision": ["decide", "choose", "option", "compare", "recommend", "best"],
+            "motivation": ["motivate", "inspire", "stuck", "tired", "give up", "push"],
+        }
+        lower = text.lower()
+        scores = {}
+        for topic, keywords in topic_map.items():
+            scores[topic] = sum(1 for kw in keywords if kw in lower)
+        best = max(scores, key=lambda k: scores[k])
+        return best if scores[best] > 0 else None
+
+    def _get_top_topics(self, n: int) -> List[Dict]:
+        sorted_topics = sorted(
+            self.knowledge_base.items(),
+            key=lambda x: x[1].get("frequency", 0),
+            reverse=True
+        )
+        return [{"topic": k, "frequency": v.get("frequency", 0)} for k, v in sorted_topics[:n]]
+
+    def get_user_agent_preference(self, user_id: str) -> Optional[str]:
+        best_agent = None
+        best_score = -1
+        for key, stats in self.user_preferences.items():
+            uid, agent = key.split(":", 1)
+            if uid != user_id:
+                continue
+            total = stats["total"]
+            if total == 0:
+                continue
+            score = stats["positive"] / total
+            if score > best_score:
+                best_score = score
+                best_agent = agent
+        return best_agent
+
+    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        action = task.get("action", "")
+        input_data = task.get("input_data", {})
+
+        if action in ("learn", "learn_from_interaction"):
+            return await self.learn_from_interaction(input_data)
+
+        if action == "get_preferences":
+            user_id = input_data.get("user_id", "default")
+            preferred = self.get_user_agent_preference(user_id)
+            return {
+                "user_id": user_id,
+                "preferred_agent": preferred,
+                "top_topics": self._get_top_topics(10),
+                "total_interactions": len(self.interaction_patterns),
+            }
+
+        if action == "get_stats":
+            return {
+                "knowledge_base_size": len(self.knowledge_base),
+                "user_preferences": len(self.user_preferences),
+                "interaction_patterns": len(self.interaction_patterns),
+                "adaptation_count": len(self.adaptation_log),
+                "top_topics": self._get_top_topics(5),
+            }
+
+        if action == "get_topic_knowledge":
+            topic = input_data.get("topic", "")
+            return self.knowledge_base.get(topic, {"error": "topic not found"})
+
+        return await self.learn_from_interaction({
+            "user_message": input_data.get("content", ""),
+            "agent_used": input_data.get("agent_used", "orchestrator_agent"),
+            "user_id": input_data.get("user_id", "default"),
         })
-        logger.info(f"Cleared all learning for agent {self.agent_id}") 

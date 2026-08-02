@@ -6,9 +6,21 @@ import uuid
 import json
 import os
 
-from structlog import get_logger
+try:
+    from structlog import get_logger
+except ImportError:
+    def get_logger():
+        return logging.getLogger(__name__)
 
-from ...config import settings
+try:
+    from agents.emotion_agent.config import settings
+except ImportError:
+    try:
+        from .config import settings
+    except ImportError:
+        class _S:
+            EMOTION_STORE_PATH = "data/emotion_store"
+        settings = _S()
 
 logger = get_logger()
 

@@ -1,8 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import asyncio
 import logging
+
+from orchestrator.execution_pipeline import execute_via_pipeline
+from orchestrator.main import get_message_broker
+from orchestrator.task_scheduler import TaskScheduler
+from orchestrator.agent_manager import AgentManager
 
 from .auth import get_current_user
 from .schemas import (
@@ -53,20 +57,54 @@ AGENT_REGISTRY = {
     "eyes_agent": {"status": "operational", "type": "core"}
 }
 
+_shared_scheduler: Optional[TaskScheduler] = None
+_shared_agent_manager: Optional[AgentManager] = None
+
+async def _get_shared_services():
+    global _shared_scheduler, _shared_agent_manager
+    if _shared_scheduler is None:
+        _shared_scheduler = TaskScheduler({
+            "message_broker": get_message_broker(),
+            "communication_controller": None,
+        })
+        await _shared_scheduler.initialize()
+        await _shared_scheduler.start()
+
+    if _shared_agent_manager is None:
+        _shared_agent_manager = AgentManager({"agents": {}})
+        await _shared_agent_manager.initialize()
+        await _shared_agent_manager.start()
+
+    return _shared_scheduler, _shared_agent_manager
+
+
 async def execute_agent_task(agent_name: str, request: AgentRequest) -> Dict[str, Any]:
-    """Execute an agent task asynchronously."""
+    """Execute an agent task via the single authoritative orchestrator execution pipeline."""
     try:
-        # Simulate agent execution
-        await asyncio.sleep(1)  # Simulate processing time
-        return {
-            "status": "success",
-            "agent_name": agent_name,
-            "result": {"message": f"Agent {agent_name} executed successfully"},
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        scheduler, agent_manager = await _get_shared_services()
+        if agent_name not in agent_manager.agents:
+            try:
+                await agent_manager.load_agent(agent_name, {})
+            except Exception:
+                pass
+
+        result = await execute_via_pipeline(
+            agent_name=agent_name,
+            action=request.action,
+            input_data=request.input_data,
+            user_id=getattr(request, "user_id", None),
+            conversation_id=getattr(request, "conversation_id", None),
+            priority=request.priority,
+            task_scheduler=scheduler,
+            agent_manager=agent_manager,
+            communication_controller=None,
+            message_broker=get_message_broker(),
+        )
+        return result
     except Exception as e:
         logger.error(f"Error executing agent {agent_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/agents/{agent_name}/execute", response_model=AgentResponse)
 async def execute_agent(

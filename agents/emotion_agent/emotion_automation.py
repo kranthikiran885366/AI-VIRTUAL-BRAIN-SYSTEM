@@ -5,9 +5,13 @@ from datetime import datetime, timedelta
 import uuid
 import json
 
-from structlog import get_logger
+try:
+    from structlog import get_logger
+except ImportError:
+    def get_logger():
+        return logging.getLogger(__name__)
 
-from ...config import settings
+from .config import settings
 
 logger = get_logger()
 

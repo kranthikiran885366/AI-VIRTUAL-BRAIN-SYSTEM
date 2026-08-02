@@ -12,6 +12,7 @@ Provides HTTP API endpoints that the Next.js frontend can call to:
 import asyncio
 import json
 import logging
+import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -22,6 +23,7 @@ import uvicorn
 from .agent_manager import AgentManager
 from .agent_communication import get_message_broker, MessageType, MessagePriority
 from .agent_lifecycle import get_lifecycle_manager
+from .task_scheduler import TaskScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +71,19 @@ class APIIntegration:
     Provides REST endpoints and WebSocket support for real-time communication.
     """
     
-    def __init__(self, agent_manager: AgentManager, port: int = 8001):
+    def __init__(
+        self,
+        agent_manager: AgentManager,
+        port: int = 8001,
+        task_scheduler: Optional[Any] = None,
+        communication_controller: Optional[Any] = None,
+    ):
         """Initialize the API integration."""
         self.agent_manager = agent_manager
         self.message_broker = get_message_broker()
         self.lifecycle_manager = get_lifecycle_manager()
+        self.task_scheduler = task_scheduler
+        self.communication_controller = communication_controller
         self.port = port
         
         # Create FastAPI app
@@ -85,6 +95,7 @@ class APIIntegration:
         
         # Register routes
         self._register_routes()
+
     
     def _register_routes(self):
         """Register API routes."""
@@ -187,8 +198,7 @@ class APIIntegration:
                 agent = await self.agent_manager.get_agent(request.agent_name)
                 if not agent:
                     raise HTTPException(status_code=404, detail=f"Agent {request.agent_name} not found")
-                
-                # Create task for agent
+
                 task = {
                     "id": str(uuid.uuid4()),
                     "agent_name": request.agent_name,
@@ -197,29 +207,29 @@ class APIIntegration:
                     "user_id": request.user_id,
                     "conversation_id": request.conversation_id,
                     "created_at": datetime.utcnow().isoformat(),
-                    "status": "pending"
+                    "status": "pending",
                 }
-                
-                # Execute the agent
-                result = await agent.execute_task(task) if hasattr(agent, "execute_task") else {
-                    "status": "completed",
-                    "message": f"Agent {request.agent_name} executed {request.action}",
-                    "task_id": task["id"]
-                }
-                
+
+                result = await self.agent_manager.execute_agent_with_timeout(
+                    request.agent_name,
+                    task,
+                    timeout_seconds=30.0,
+                )
+
                 return {
                     "status": "success",
                     "task_id": task["id"],
                     "agent": request.agent_name,
                     "result": result,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.utcnow().isoformat(),
                 }
-            
+
             except HTTPException:
                 raise
             except Exception as e:
                 logger.error(f"Agent execution error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
+
         
         # Message endpoints
         @self.app.post("/messages/send")
@@ -347,5 +357,5 @@ class APIIntegration:
         uvicorn.run(self.app, host=host, port=self.port, log_level="info")
 
 
-# Import uuid for task creation
-import uuid
+# Import uuid for task creation — kept here for backward compatibility
+# (uuid is already imported at the top of this module)

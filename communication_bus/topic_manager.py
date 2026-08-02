@@ -1,14 +1,180 @@
 import asyncio
 import logging
-from typing import Dict, List, Optional, Set
 from datetime import datetime
+from typing import Dict, List, Optional
 
-import aiokafka
-from structlog import get_logger
+try:
+    import aiokafka
+    _AIOKAFKA_AVAILABLE = True
+except ImportError:
+    aiokafka = None  # type: ignore
+    _AIOKAFKA_AVAILABLE = False
 
-from .config import settings
+try:
+    from structlog import get_logger
+    logger = get_logger()
+except ImportError:
+    logger = logging.getLogger(__name__)  # type: ignore
 
-logger = get_logger()
+try:
+    from .config import settings
+except ImportError:
+    class _S:  # type: ignore
+        KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+        TOPIC_MANAGEMENT_INTERVAL = 300
+        DEFAULT_PARTITIONS = 3
+        DEFAULT_REPLICATION_FACTOR = 1
+    settings = _S()
+
+
+class TopicManager:
+    """Manages Kafka topics. Degrades gracefully when Kafka is unavailable."""
+
+    def __init__(self) -> None:
+        self.admin_client: Optional[Any] = None
+        self.topics: Dict[str, Dict] = {}
+        self._manage_task: Optional[asyncio.Task] = None
+        self._initialized = False
+        self.is_running = False
+
+    async def initialize(self) -> None:
+        if self._initialized:
+            return
+        logger.info("topic_manager.initializing")
+        if _AIOKAFKA_AVAILABLE:
+            try:
+                self.admin_client = aiokafka.AIOKafkaAdminClient(
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS
+                )
+                # Must start the admin client before any operations
+                await self.admin_client.start()
+                await self._load_topics()
+                await self._create_default_topics()
+                logger.info("topic_manager.kafka_connected")
+            except Exception as exc:
+                logger.warning("topic_manager.kafka_unavailable", error=str(exc))
+                self.admin_client = None
+        else:
+            logger.info("topic_manager.kafka_not_installed")
+
+        self.is_running = True
+        self._initialized = True
+        logger.info("topic_manager.initialized", topics=len(self.topics))
+
+    async def shutdown(self) -> None:
+        logger.info("topic_manager.shutting_down")
+        self.is_running = False
+        if self._manage_task and not self._manage_task.done():
+            self._manage_task.cancel()
+            try:
+                await self._manage_task
+            except asyncio.CancelledError:
+                pass
+        if self.admin_client:
+            try:
+                await self.admin_client.close()
+            except Exception:
+                pass
+        self._initialized = False
+        logger.info("topic_manager.stopped")
+
+    async def manage_topics(self) -> None:
+        """Background loop called from main.py. Exits cleanly on shutdown."""
+        while self.is_running:
+            try:
+                await asyncio.sleep(settings.TOPIC_MANAGEMENT_INTERVAL)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("topic_manager.manage_error", error=str(exc))
+                await asyncio.sleep(1)
+
+    async def _load_topics(self) -> None:
+        if not self.admin_client:
+            return
+        try:
+            topic_names = await self.admin_client.list_topics()
+            for name in topic_names:
+                self.topics[name] = {"name": name, "created_at": datetime.utcnow().isoformat()}
+            logger.info("topic_manager.topics_loaded", count=len(self.topics))
+        except Exception as exc:
+            logger.warning("topic_manager.load_topics_failed", error=str(exc))
+
+    async def _create_default_topics(self) -> None:
+        defaults = {
+            "agent-communication": {"num_partitions": 3, "replication_factor": 1, "retention_hours": 24},
+            "system-events": {"num_partitions": 3, "replication_factor": 1, "retention_hours": 168},
+            "health-metrics": {"num_partitions": 3, "replication_factor": 1, "retention_hours": 24},
+            "task-updates": {"num_partitions": 3, "replication_factor": 1, "retention_hours": 24},
+        }
+        for name, cfg in defaults.items():
+            if name not in self.topics:
+                await self.create_topic(name, cfg)
+
+    async def create_topic(self, topic_name: str, config: Dict) -> bool:
+        self.topics[topic_name] = {
+            "name": topic_name,
+            "config": config,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        if not self.admin_client:
+            return True  # in-memory only when Kafka unavailable
+        try:
+            await self.admin_client.create_topics([
+                aiokafka.admin.NewTopic(
+                    name=topic_name,
+                    num_partitions=config.get("num_partitions", settings.DEFAULT_PARTITIONS),
+                    replication_factor=config.get("replication_factor", settings.DEFAULT_REPLICATION_FACTOR),
+                    topic_configs={
+                        "retention.ms": str(config.get("retention_hours", 24) * 3_600_000)
+                    },
+                )
+            ])
+            logger.info("topic_manager.topic_created", topic=topic_name)
+            return True
+        except Exception as exc:
+            logger.warning("topic_manager.create_topic_failed", topic=topic_name, error=str(exc))
+            return True  # already recorded in-memory
+
+    async def delete_topic(self, topic_name: str) -> bool:
+        self.topics.pop(topic_name, None)
+        if not self.admin_client:
+            return True
+        try:
+            await self.admin_client.delete_topics([topic_name])
+            logger.info("topic_manager.topic_deleted", topic=topic_name)
+            return True
+        except Exception as exc:
+            logger.warning("topic_manager.delete_topic_failed", topic=topic_name, error=str(exc))
+            return False
+
+    async def get_topic(self, topic_name: str) -> Optional[Dict]:
+        return self.topics.get(topic_name)
+
+    async def list_topics(self) -> List[Dict]:
+        return list(self.topics.values())
+
+    async def update_topic_config(self, topic_name: str, config: Dict) -> bool:
+        if topic_name in self.topics:
+            self.topics[topic_name].setdefault("config", {}).update(config)
+            self.topics[topic_name]["updated_at"] = datetime.utcnow().isoformat()
+        return True
+
+    async def get_status(self) -> Dict:
+        return {
+            "initialized": self._initialized,
+            "total_topics": len(self.topics),
+            "topics": list(self.topics.keys()),
+            "kafka_connected": self.admin_client is not None,
+        }
+
+
+# Satisfy the Any type hint used above without importing typing at module level twice
+try:
+    from typing import Any
+except ImportError:
+    pass
+
 
 class TopicManager:
     """Manages Kafka topics and their configurations."""

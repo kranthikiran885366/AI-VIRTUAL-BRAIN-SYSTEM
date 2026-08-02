@@ -7,7 +7,15 @@ import numpy as np
 from PIL import Image
 import torchvision
 from torchvision import transforms
-from transformers import AutoModelForVision2Seq, AutoTokenizer, AutoConfig, AutoProcessor
+try:
+    from transformers import AutoModelForVision2Seq, AutoTokenizer, AutoConfig, AutoProcessor
+    _HAS_TRANSFORMERS = True
+except Exception:
+    AutoModelForVision2Seq = None
+    AutoTokenizer = None
+    AutoConfig = None
+    AutoProcessor = None
+    _HAS_TRANSFORMERS = False
 from datasets import load_dataset
 from .base_training import BaseTrainingService
 

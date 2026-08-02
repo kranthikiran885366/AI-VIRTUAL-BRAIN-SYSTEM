@@ -1,80 +1,37 @@
-from typing import Optional
-from pydantic import BaseSettings, validator
+from typing import Optional, List
 import os
 
-class EmotionAgentSettings(BaseSettings):
-    """Settings for the Emotion Agent."""
-    
-    # Emotion processor settings
-    EMOTION_HISTORY_MAX_SIZE: int = 1000
-    EMOTION_DECAY_RATE: float = 0.1  # 10% decay per second
-    EMOTION_MIN_INTENSITY: float = 0.1
-    
-    # Emotion analyzer settings
-    EMOTION_ANALYSIS_HISTORY_SIZE: int = 100
-    EMOTION_PATTERN_CONFIDENCE_THRESHOLD: float = 0.7
-    EMOTION_IMPACT_THRESHOLD: float = 0.8
-    
-    # Emotion store settings
-    EMOTION_STORE_PATH: str = "databases/emotion_db/store"
-    
-    # API settings
-    API_HOST: str = "localhost"
-    API_PORT: int = 8001
-    API_DEBUG: bool = False
-    
-    # Logging settings
-    LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    
-    # Redis settings
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_DB: int = 1
-    REDIS_PASSWORD: Optional[str] = None
-    
-    # Kafka settings
-    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
-    KAFKA_GROUP_ID: str = "emotion_agent"
-    KAFKA_TOPICS: list = ["emotion_events", "emotion_commands"]
-    
-    # Processing settings
-    PROCESSING_INTERVAL: float = 1.0  # seconds
-    BATCH_SIZE: int = 100
-    
-    # Health check settings
-    HEALTH_CHECK_INTERVAL: float = 30.0  # seconds
-    MAX_MEMORY_USAGE: float = 0.8  # 80% of available memory
-    
-    # Monitoring settings
-    ENABLE_PROMETHEUS: bool = True
-    PROMETHEUS_PORT: int = 9091
-    ENABLE_SENTRY: bool = False
-    SENTRY_DSN: Optional[str] = None
-    
-    # Service URLs
-    API_GATEWAY_URL: str = "http://localhost:8000"
-    ORCHESTRATOR_URL: str = "http://localhost:8001"
-    MEMORY_AGENT_URL: str = "http://localhost:8002"
-    
-    @validator("EMOTION_STORE_PATH")
-    def validate_storage_path(cls, v):
-        """Validate storage path."""
-        # Create directory if it doesn't exist
-        os.makedirs(v, exist_ok=True)
-        return v
-    
-    @validator("KAFKA_TOPICS")
-    def validate_kafka_topics(cls, v):
-        """Validate Kafka topics."""
-        if not isinstance(v, list):
-            raise ValueError("KAFKA_TOPICS must be a list")
-        return v
-    
-    class Config:
-        """Pydantic config."""
-        env_prefix = "EMOTION_AGENT_"
-        case_sensitive = True
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    try:
+        from pydantic import BaseSettings
+    except ImportError:
+        class BaseSettings:
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
 
-# Create settings instance
+class EmotionAgentSettings:
+    """Settings for the Emotion Agent — loaded from env with safe defaults."""
+
+    EMOTION_HISTORY_MAX_SIZE: int = int(os.environ.get("EMOTION_HISTORY_MAX_SIZE", 1000))
+    EMOTION_DECAY_RATE: float = float(os.environ.get("EMOTION_DECAY_RATE", 0.1))
+    EMOTION_MIN_INTENSITY: float = float(os.environ.get("EMOTION_MIN_INTENSITY", 0.1))
+    EMOTION_ANALYSIS_HISTORY_SIZE: int = int(os.environ.get("EMOTION_ANALYSIS_HISTORY_SIZE", 100))
+    EMOTION_PATTERN_CONFIDENCE_THRESHOLD: float = float(os.environ.get("EMOTION_PATTERN_CONFIDENCE_THRESHOLD", 0.7))
+    EMOTION_IMPACT_THRESHOLD: float = float(os.environ.get("EMOTION_IMPACT_THRESHOLD", 0.8))
+    EMOTION_STORE_PATH: str = os.environ.get("EMOTION_STORE_PATH", "data/emotion_store")
+    API_HOST: str = os.environ.get("EMOTION_AGENT_HOST", "localhost")
+    API_PORT: int = int(os.environ.get("EMOTION_AGENT_PORT", 8003))
+    API_DEBUG: bool = os.environ.get("DEBUG", "false").lower() == "true"
+    LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
+    ORCHESTRATOR_URL: str = os.environ.get("ORCHESTRATOR_URL", "http://localhost:8001")
+    MEMORY_AGENT_URL: str = os.environ.get("MEMORY_AGENT_URL", "http://localhost:8001")
+    TASK_AGENT_URL: str = os.environ.get("TASK_AGENT_URL", "http://localhost:8001")
+
+    def __init__(self):
+        os.makedirs(self.EMOTION_STORE_PATH, exist_ok=True)
+
+# Singleton
 settings = EmotionAgentSettings() 

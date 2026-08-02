@@ -1,0 +1,42 @@
+[
+  {
+    "type": "concept",
+    "content": "Ikigai framework: find purpose at the intersection of passion, skill, need, and value",
+    "category": "values"
+  },
+  {
+    "type": "concept",
+    "content": "Wabi-sabi aesthetics: embrace imperfection and impermanence in iterative design",
+    "category": "traditions"
+  },
+  {
+    "type": "concept",
+    "content": "Ubuntu philosophy: collective intelligence and shared ownership in team systems",
+    "category": "values"
+  },
+  {
+    "type": "approach",
+    "content": "Apply storytelling structures (hero's journey, three-act) to product narratives",
+    "category": "expressions"
+  },
+  {
+    "type": "approach",
+    "content": "Use rituals and ceremonies (stand-ups, retrospectives) to reinforce team culture",
+    "category": "traditions"
+  },
+  {
+    "type": "approach",
+    "content": "Embrace beginner's mind (Shoshin): revisit assumptions with fresh eyes regularly",
+    "category": "values"
+  },
+  {
+    "type": "implementation",
+    "content": "Build community-driven feedback systems that treat users as co-creators",
+    "category": "values"
+  },
+  {
+    "type": "implementation",
+    "content": "Implement recognition systems that celebrate learning from failure",
+    "category": "expressions"
+  }
+]

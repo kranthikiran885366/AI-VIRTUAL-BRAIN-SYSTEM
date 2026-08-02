@@ -1,14 +1,168 @@
 import asyncio
-import logging
-from typing import Dict, Any, Optional, List, Callable, Awaitable
 import json
+import logging
 from datetime import datetime
-from dataclasses import dataclass, asdict
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from kafka import KafkaConsumer
-from kafka.errors import KafkaError
+try:
+    import aiokafka
+    _AIOKAFKA_AVAILABLE = True
+except ImportError:
+    aiokafka = None  # type: ignore
+    _AIOKAFKA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+class EventConsumer:
+    """Async event consumer. Uses aiokafka when available; falls back to no-op."""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config or {}
+        self.is_running = False
+        self.consumer: Optional[Any] = None
+        self.event_handlers: Dict[str, List[Callable[[Dict[str, Any]], Awaitable[None]]]] = {}
+        self._process_task: Optional[asyncio.Task] = None
+        self.metrics = {
+            "total_events": 0,
+            "processed_events": 0,
+            "failed_events": 0,
+            "average_processing_time": 0.0,
+        }
+
+    async def start(self) -> None:
+        if self.is_running:
+            return
+        logger.info("event_consumer.starting")
+        kafka_cfg = self.config.get("kafka", {})
+        if kafka_cfg.get("enabled", False) and _AIOKAFKA_AVAILABLE:
+            servers = kafka_cfg.get("bootstrap_servers", ["localhost:9092"])
+            topics = kafka_cfg.get("topics", [])
+            try:
+                self.consumer = aiokafka.AIOKafkaConsumer(
+                    *topics,
+                    bootstrap_servers=servers,
+                    group_id=kafka_cfg.get("group_id", "event-consumer"),
+                    value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+                    auto_offset_reset=kafka_cfg.get("auto_offset_reset", "latest"),
+                    enable_auto_commit=kafka_cfg.get("enable_auto_commit", True),
+                    auto_commit_interval_ms=kafka_cfg.get("auto_commit_interval_ms", 5000),
+                )
+                await self.consumer.start()
+                logger.info("event_consumer.kafka_connected", topics=topics)
+            except Exception as exc:
+                logger.warning("event_consumer.kafka_init_failed", error=str(exc))
+                self.consumer = None
+
+        self.is_running = True
+        # Store task reference — prevents GC on Python 3.11+
+        self._process_task = asyncio.create_task(
+            self._process_events(), name="event_consumer.process"
+        )
+        logger.info("event_consumer.started")
+
+    async def stop(self) -> None:
+        if not self.is_running:
+            return
+        logger.info("event_consumer.stopping")
+        self.is_running = False
+        if self._process_task and not self._process_task.done():
+            self._process_task.cancel()
+            try:
+                await self._process_task
+            except asyncio.CancelledError:
+                pass
+        if self.consumer:
+            try:
+                await self.consumer.stop()
+            except Exception:
+                pass
+        logger.info("event_consumer.stopped")
+
+    def register_handler(
+        self, event_type: str, handler: Callable[[Dict[str, Any]], Awaitable[None]]
+    ) -> None:
+        if event_type not in self.event_handlers:
+            self.event_handlers[event_type] = []
+        self.event_handlers[event_type].append(handler)
+        logger.info("event_consumer.handler_registered", event_type=event_type)
+
+    def unregister_handler(
+        self, event_type: str, handler: Callable[[Dict[str, Any]], Awaitable[None]]
+    ) -> None:
+        if event_type in self.event_handlers:
+            try:
+                self.event_handlers[event_type].remove(handler)
+            except ValueError:
+                pass
+
+    async def _process_events(self) -> None:
+        """Consume from Kafka when available; otherwise idle until stopped."""
+        if not self.consumer:
+            # No Kafka — just wait until stopped
+            while self.is_running:
+                await asyncio.sleep(0.1)
+            return
+
+        while self.is_running:
+            try:
+                msg = await asyncio.wait_for(self.consumer.getone(), timeout=0.5)
+                event_data = msg.value
+                if isinstance(event_data, dict):
+                    await self._handle_event(event_data)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("event_consumer.process_error", error=str(exc))
+                await asyncio.sleep(1)
+
+    async def _handle_event(self, event_data: Dict[str, Any]) -> None:
+        start = datetime.utcnow()
+        event_type = event_data.get("event_type", "")
+        handlers = self.event_handlers.get(event_type, [])
+        if not handlers:
+            logger.debug("event_consumer.no_handlers", event_type=event_type)
+            return
+        self.metrics["total_events"] += 1
+        try:
+            for handler in handlers:
+                try:
+                    await handler(event_data)
+                except Exception as exc:
+                    logger.error("event_consumer.handler_error", event_type=event_type, error=str(exc))
+            n = self.metrics["processed_events"] + 1
+            self.metrics["processed_events"] = n
+            elapsed = (datetime.utcnow() - start).total_seconds()
+            self.metrics["average_processing_time"] = (
+                (self.metrics["average_processing_time"] * (n - 1) + elapsed) / n
+            )
+        except Exception as exc:
+            logger.error("event_consumer.handle_error", error=str(exc))
+            self.metrics["failed_events"] += 1
+
+    async def get_status(self) -> Dict[str, Any]:
+        return {
+            "status": "running" if self.is_running else "stopped",
+            "metrics": self.metrics,
+            "registered_handlers": {
+                et: len(hs) for et, hs in self.event_handlers.items()
+            },
+            "kafka_connected": self.consumer is not None,
+        }
+
+    async def get_metrics(self) -> Dict[str, Any]:
+        return dict(self.metrics)
+
+    async def clear_metrics(self) -> None:
+        self.metrics = {
+            "total_events": 0,
+            "processed_events": 0,
+            "failed_events": 0,
+            "average_processing_time": 0.0,
+        }
+
 
 @dataclass
 class Event:

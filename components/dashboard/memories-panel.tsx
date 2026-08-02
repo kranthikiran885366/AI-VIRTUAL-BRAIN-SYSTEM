@@ -17,8 +17,15 @@ const memoryTypeColors: Record<string, string> = {
   general: "bg-slate-500/20 text-slate-400",
 }
 
-export function MemoriesPanel() {
-  const { data: memories, mutate } = useSWR<Memory[]>("/api/memories?limit=20", fetcher)
+interface MemoriesPanelProps {
+  userId?: string
+}
+
+export function MemoriesPanel({ userId }: MemoriesPanelProps) {
+  const { data: memories, mutate } = useSWR<Memory[]>(
+    userId ? `/api/memories?userId=${userId}&limit=20` : null,
+    fetcher
+  )
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this memory?")) return

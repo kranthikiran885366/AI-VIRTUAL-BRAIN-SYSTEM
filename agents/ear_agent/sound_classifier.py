@@ -1,251 +1,225 @@
-import logging
-import numpy as np
-import tensorflow as tf
-import tensorflow_hub as hub
-from typing import Dict, Any, List, Tuple, Optional
-import yaml
-from pathlib import Path
+"""
+SoundClassifier — Production implementation with lazy imports.
+
+Backends (in priority order):
+  1. YAMNet via TensorFlow Hub (521-class audio event recognition)
+  2. Acoustic feature classifier using librosa
+     (spectral centroid + energy → speech / music / noise / silence)
+"""
+
 import asyncio
+import logging
 import queue
 import threading
+import time as _time
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+    np = None  # type: ignore
+
+_DEFAULT_SOUNDS = [
+    "Speech", "Music", "Silence", "Noise",
+    "Dog", "Cat", "Bird", "Vehicle", "Door", "Alarm",
+    "Applause", "Laughter", "Baby cry", "Telephone",
+]
+
+_YAMNET_URL = "https://tfhub.dev/google/yamnet/1"
+
 
 class SoundClassifier:
-    def __init__(self, config_path: str = "config/ear_agent_config.yaml"):
+    """Classifies environmental sounds using YAMNet (primary) or acoustic features (fallback)."""
+
+    def __init__(self, config: Dict[str, Any]):
         self.logger = logging.getLogger(__name__)
-        self.config = self._load_config(config_path)
-        self.sound_config = self.config.get("sound_classification", {})
-        
-        # Initialize sound classification parameters
-        self.model = self.sound_config.get("model", "yamnet")
-        self.confidence_threshold = self.sound_config.get("confidence_threshold", 0.6)
-        self.supported_sounds = self.sound_config.get("supported_sounds", [])
-        
-        # Initialize components
-        self.yamnet_model = None
-        self.class_names = None
-        self.processing_queue = queue.Queue()
-        self.is_processing = False
-        self.processing_thread = None
-        
-        # Load model
+        self.config = config
+        sound_cfg = config.get("sound_classification", {})
+
+        self.model_name: str = sound_cfg.get("model", "yamnet")
+        self.confidence_threshold: float = float(sound_cfg.get("confidence_threshold", 0.50))
+        self._supported_sounds_cfg: List[str] = sound_cfg.get("supported_sounds", _DEFAULT_SOUNDS)
+        self.sample_rate: int = int(config.get("audio", {}).get("sample_rate", 16000))
+        self.top_k: int = int(sound_cfg.get("top_k", 5))
+
+        self._backend: str = "acoustic"
+        self._yamnet_model = None
+        self._class_names: List[str] = []
+        self.supported_sounds: List[str] = list(self._supported_sounds_cfg)
+
+        self.processing_queue: queue.Queue = queue.Queue()
+        self.is_processing: bool = False
+        self.processing_thread: Optional[threading.Thread] = None
+
         self._initialize_model()
-    
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file"""
-        try:
-            config_file = Path(config_path)
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    return yaml.safe_load(f)
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading config: {e}")
-            return {}
-    
+
+    # ─── Model Initialization ─────────────────────────────────────────────────
+
     def _initialize_model(self):
-        """Initialize sound classification model"""
-        try:
-            if self.model == "yamnet":
-                # Load YAMNet model
-                self.yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
-                
-                # Get class names
-                self.class_names = self.yamnet_model.class_names
-                
-                # Filter supported sounds
-                self.supported_sounds = [
-                    sound for sound in self.supported_sounds
-                    if sound in self.class_names
+        if self.model_name in ("yamnet", "auto") and _HAS_NUMPY:
+            try:
+                import tensorflow as tf
+                import tensorflow_hub as hub
+                self._yamnet_model = hub.load(_YAMNET_URL)
+                raw_names = self._yamnet_model.class_names
+                self._class_names = [
+                    n.decode("utf-8") if isinstance(n, bytes) else str(n)
+                    for n in raw_names
                 ]
-                
-                self.logger.info(f"Initialized YAMNet model with {len(self.supported_sounds)} supported sounds")
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
-        except Exception as e:
-            self.logger.error(f"Error initializing sound classification model: {e}")
-            raise
-    
-    async def classify_sound(self, audio_data: np.ndarray, sample_rate: int = 16000) -> List[Dict[str, Any]]:
-        """Classify sound in audio data"""
+                self.supported_sounds = [
+                    s for s in self._supported_sounds_cfg if s in self._class_names
+                ] or self._supported_sounds_cfg
+                self._backend = "yamnet"
+                self.logger.info(
+                    f"SoundClassifier: loaded YAMNet ({len(self._class_names)} classes, "
+                    f"{len(self.supported_sounds)} supported)"
+                )
+                return
+            except Exception as e:
+                self.logger.warning(f"SoundClassifier: YAMNet load failed — {e}")
+
+        if _HAS_NUMPY:
+            self._backend = "acoustic"
+            self.logger.info("SoundClassifier: using acoustic feature fallback")
+        else:
+            self.logger.warning("SoundClassifier: no backend available")
+
+    # ─── Main Classification API ──────────────────────────────────────────────
+
+    async def classify_sound(self, audio_data, sample_rate: int = None) -> List[Dict[str, Any]]:
+        sr = sample_rate or self.sample_rate
         try:
-            if self.model == "yamnet":
-                return await self._classify_yamnet(audio_data, sample_rate)
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
+            if self._backend == "yamnet":
+                return self._classify_yamnet(audio_data, sr)
+            return self._classify_acoustic(audio_data, sr)
         except Exception as e:
-            self.logger.error(f"Error classifying sound: {e}")
+            self.logger.error(f"SoundClassifier.classify_sound failed: {e}")
             return []
-    
-    async def _classify_yamnet(self, audio_data: np.ndarray, sample_rate: int) -> List[Dict[str, Any]]:
-        """Classify sound using YAMNet"""
+
+    # ─── YAMNet Backend ───────────────────────────────────────────────────────
+
+    def _classify_yamnet(self, audio_data, sample_rate: int) -> List[Dict[str, Any]]:
         try:
-            # Convert audio to float32
-            audio_float32 = audio_data.astype(np.float32) / 32768.0
-            
-            # Add batch dimension
-            audio_batch = np.expand_dims(audio_float32, axis=0)
-            
-            # Get predictions
-            scores, embeddings, spectrogram = self.yamnet_model(audio_batch)
-            
-            # Get top predictions
-            scores = scores.numpy()[0]
-            top_indices = np.argsort(scores)[::-1][:5]  # Top 5 predictions
-            
+            import numpy as np_local
+            audio_f32 = audio_data.astype(np_local.float32) / 32768.0
+
+            if sample_rate != 16000 and _HAS_NUMPY:
+                try:
+                    import librosa
+                    audio_f32 = librosa.resample(audio_f32, orig_sr=sample_rate, target_sr=16000)
+                except Exception:
+                    ratio = 16000 / sample_rate
+                    new_len = int(len(audio_f32) * ratio)
+                    indices = [int(i / ratio) for i in range(new_len)]
+                    audio_f32 = np_local.array([audio_f32[min(i, len(audio_f32)-1)] for i in indices], dtype=np_local.float32)
+
+            scores, embeddings, spectrogram = self._yamnet_model(audio_f32)
+            scores_np = scores.numpy()
+            mean_scores = scores_np.mean(axis=0)
+            top_indices = mean_scores.argsort()[::-1][:self.top_k]
+
+            ts = datetime.utcnow().isoformat()
             results = []
             for idx in top_indices:
-                class_name = self.class_names[idx].decode('utf-8')
-                confidence = float(scores[idx])
-                
-                # Only include supported sounds above threshold
-                if class_name in self.supported_sounds and confidence >= self.confidence_threshold:
+                class_name = self._class_names[int(idx)]
+                confidence = round(float(mean_scores[idx]), 4)
+                if confidence >= self.confidence_threshold:
                     results.append({
                         "sound": class_name,
                         "confidence": confidence,
-                        "timestamp": asyncio.get_event_loop().time()
+                        "timestamp": ts,
+                        "backend": "yamnet",
                     })
-            
             return results
-        
         except Exception as e:
-            self.logger.error(f"Error in YAMNet classification: {e}")
-            return []
-    
-    def start_processing(self, callback: Optional[callable] = None):
-        """Start sound classification processing"""
-        try:
-            if self.is_processing:
-                self.logger.warning("Already processing")
-                return
-            
-            self.is_processing = True
-            
-            # Start processing thread
-            self.processing_thread = threading.Thread(
-                target=self._process_queue,
-                args=(callback,) if callback else (),
-                daemon=True
-            )
-            self.processing_thread.start()
-            
-            self.logger.info("Started sound classification processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error starting sound classification: {e}")
-            self.is_processing = False
-            raise
-    
-    def stop_processing(self):
-        """Stop sound classification processing"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.is_processing = False
-            
-            if self.processing_thread:
-                self.processing_thread.join(timeout=5)
-                self.processing_thread = None
-            
-            self.logger.info("Stopped sound classification processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error stopping sound classification: {e}")
-            raise
-    
-    def _process_queue(self, callback: Optional[callable] = None):
-        """Process audio data from queue"""
-        try:
-            while self.is_processing:
-                try:
-                    # Get audio data from queue
-                    audio_data = self.processing_queue.get(timeout=1)
-                    
-                    # Classify sound
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    results = loop.run_until_complete(
-                        self.classify_sound(audio_data["audio"])
-                    )
-                    loop.close()
-                    
-                    # Call callback if provided
-                    if callback and results:
-                        callback({
-                            "results": results,
-                            "timestamp": audio_data["timestamp"]
-                        })
-                    
-                    self.processing_queue.task_done()
-                
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    self.logger.error(f"Error processing audio: {e}")
-        
-        except Exception as e:
-            self.logger.error(f"Error in sound classification thread: {e}")
-    
-    def add_audio_data(self, audio_data: np.ndarray, timestamp: float):
-        """Add audio data to processing queue"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.processing_queue.put({
-                "audio": audio_data,
-                "timestamp": timestamp
-            })
-        
-        except Exception as e:
-            self.logger.error(f"Error adding audio data: {e}")
-    
-    def get_supported_sounds(self) -> List[str]:
-        """Get list of supported sounds"""
-        return self.supported_sounds.copy()
-    
-    def set_confidence_threshold(self, threshold: float):
-        """Set confidence threshold for sound classification"""
-        try:
-            if not 0 <= threshold <= 1:
-                raise ValueError("Confidence threshold must be between 0 and 1")
-            
-            self.confidence_threshold = threshold
-            self.logger.info(f"Set confidence threshold to {threshold}")
-        
-        except Exception as e:
-            self.logger.error(f"Error setting confidence threshold: {e}")
-            raise
-    
-    def cleanup(self):
-        """Clean up resources"""
-        try:
-            self.stop_processing()
-            if self.yamnet_model:
-                del self.yamnet_model
-        except Exception as e:
-            self.logger.error(f"Error cleaning up sound classifier: {e}")
+            self.logger.error(f"SoundClassifier: YAMNet inference failed: {e}")
+            return self._classify_acoustic(audio_data, sample_rate)
 
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Test sound classifier
-    async def test_classifier():
-        classifier = SoundClassifier()
+    # ─── Acoustic Feature Fallback ────────────────────────────────────────────
+
+    def _classify_acoustic(self, audio_data, sample_rate: int) -> List[Dict[str, Any]]:
         try:
-            # Test with dummy audio data
-            audio_data = np.zeros(16000, dtype=np.int16)  # 1 second of silence
-            results = await classifier.classify_sound(audio_data)
-            print("Classification results:")
-            for result in results:
-                print(f"- {result['sound']}: {result['confidence']:.2f}")
-        finally:
-            classifier.cleanup()
-    
-    asyncio.run(test_classifier()) 
+            import numpy as np_local
+            audio_f32 = audio_data.astype(np_local.float32) / 32768.0
+            rms = float(np_local.sqrt(np_local.mean(audio_f32 ** 2)))
+            ts = datetime.utcnow().isoformat()
+
+            if rms < 0.005:
+                return [{"sound": "Silence", "confidence": 0.92, "timestamp": ts, "backend": "acoustic"}]
+
+            zcr = float(np_local.mean(np_local.abs(np_local.diff(np_local.sign(audio_f32)))) / 2)
+
+            try:
+                import librosa
+                sc = float(np_local.mean(librosa.feature.spectral_centroid(y=audio_f32, sr=sample_rate)))
+                sr_feat = librosa.feature.spectral_rolloff(y=audio_f32, sr=sample_rate)
+                rolloff = float(np_local.mean(sr_feat))
+            except Exception:
+                sc, rolloff = 2000.0, 4000.0
+
+            if zcr < 0.10 and sc < 2500:
+                sound, conf = "Speech", round(min(0.88, 0.55 + rms * 2), 3)
+            elif sc > 4000 and rolloff > 8000:
+                sound, conf = "Music", round(min(0.85, 0.50 + rms * 1.5), 3)
+            elif rms > 0.15:
+                sound, conf = "Noise", round(min(0.80, 0.45 + rms), 3)
+            else:
+                sound, conf = "Speech", round(min(0.75, 0.40 + rms * 2), 3)
+
+            return [{"sound": sound, "confidence": conf, "timestamp": ts, "backend": "acoustic"}]
+        except Exception as e:
+            self.logger.error(f"SoundClassifier: acoustic fallback failed: {e}")
+            return []
+
+    # ─── Processing Thread ────────────────────────────────────────────────────
+
+    def start_processing(self, callback: Optional[Callable] = None):
+        if self.is_processing:
+            return
+        self.is_processing = True
+        self.processing_thread = threading.Thread(
+            target=self._processing_loop, args=(callback,), daemon=True
+        )
+        self.processing_thread.start()
+        self.logger.info("SoundClassifier: processing thread started")
+
+    def stop_processing(self):
+        self.is_processing = False
+        if self.processing_thread:
+            self.processing_thread.join(timeout=5)
+            self.processing_thread = None
+
+    def _processing_loop(self, callback: Optional[Callable]):
+        while self.is_processing:
+            try:
+                item = self.processing_queue.get(timeout=1.0)
+                results = asyncio.run(self.classify_sound(item["audio"]))
+                for r in results:
+                    r["audio_timestamp"] = item["timestamp"]
+                    if callback:
+                        callback(r)
+                self.processing_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.logger.error(f"SoundClassifier: processing loop error: {e}")
+
+    def add_audio_data(self, audio_data, timestamp: float):
+        if not self.is_processing:
+            return
+        self.processing_queue.put({"audio": audio_data, "timestamp": timestamp})
+
+    def get_supported_sounds(self) -> List[str]:
+        return list(self.supported_sounds)
+
+    def set_confidence_threshold(self, threshold: float):
+        if not 0 <= threshold <= 1:
+            raise ValueError("Confidence threshold must be between 0 and 1")
+        self.confidence_threshold = threshold
+
+    def cleanup(self):
+        self.stop_processing()
+        self._yamnet_model = None

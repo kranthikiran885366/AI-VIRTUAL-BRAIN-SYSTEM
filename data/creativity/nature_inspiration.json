@@ -1,0 +1,42 @@
+[
+  {
+    "type": "concept",
+    "content": "Swarm intelligence: emergent collective behaviour from simple individual rules",
+    "category": "systems"
+  },
+  {
+    "type": "concept",
+    "content": "Mycelial networks as a model for decentralised, resilient communication",
+    "category": "patterns"
+  },
+  {
+    "type": "concept",
+    "content": "Biomimicry: Velcro from burr hooks, sharkskin for drag reduction, termite mounds for HVAC",
+    "category": "adaptations"
+  },
+  {
+    "type": "approach",
+    "content": "Design self-healing systems inspired by biological wound repair",
+    "category": "adaptations"
+  },
+  {
+    "type": "approach",
+    "content": "Apply fractal self-similarity to scale-invariant UI components and data structures",
+    "category": "patterns"
+  },
+  {
+    "type": "approach",
+    "content": "Use evolutionary algorithms (genetic selection, mutation) for parameter optimisation",
+    "category": "systems"
+  },
+  {
+    "type": "implementation",
+    "content": "Implement ant-colony optimisation for real-time routing and scheduling problems",
+    "category": "systems"
+  },
+  {
+    "type": "implementation",
+    "content": "Build resource-sharing models inspired by mycorrhizal nutrient exchange",
+    "category": "patterns"
+  }
+]

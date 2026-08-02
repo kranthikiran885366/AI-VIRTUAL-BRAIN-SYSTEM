@@ -6,7 +6,7 @@ import uuid
 
 from structlog import get_logger
 
-from ...config import settings
+from .config import settings
 
 logger = get_logger()
 

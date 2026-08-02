@@ -4,9 +4,21 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import uuid
 
-from structlog import get_logger
+try:
+    from structlog import get_logger
+except ImportError:
+    def get_logger():
+        return logging.getLogger(__name__)
 
-from ...config import settings
+try:
+    from agents.task_agent.config import settings
+except ImportError:
+    try:
+        from .config import settings
+    except ImportError:
+        class _S:
+            TASK_ANALYSIS_HISTORY_SIZE = 1000
+        settings = _S()
 
 logger = get_logger()
 

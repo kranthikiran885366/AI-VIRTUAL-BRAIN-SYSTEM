@@ -4,7 +4,13 @@ import time
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+try:
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    _HAS_TRANSFORMERS = True
+except Exception:
+    AutoTokenizer = None
+    AutoModelForSequenceClassification = None
+    _HAS_TRANSFORMERS = False
 
 @dataclass
 class ThreatConfig:
@@ -33,16 +39,24 @@ class ThreatAnalyzer:
     
     def _init_models(self):
         """Initialize threat analysis models."""
-        # Initialize text classification model
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            self.config.model_path,
-            num_labels=len(self.config.threat_categories)
-        )
-        
-        # Move model to specified device
-        if self.config.device == "cuda" and torch.cuda.is_available():
-            self.model = self.model.to("cuda")
+        # Initialize text classification model when available
+        if _HAS_TRANSFORMERS and AutoTokenizer and AutoModelForSequenceClassification:
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
+                self.model = AutoModelForSequenceClassification.from_pretrained(
+                    self.config.model_path,
+                    num_labels=len(self.config.threat_categories)
+                )
+                # Move model to specified device
+                if self.config.device == "cuda" and torch.cuda.is_available():
+                    self.model = self.model.to("cuda")
+            except Exception as e:
+                self.logger.error(f"Error initializing threat models: {e}")
+                self.tokenizer = None
+                self.model = None
+        else:
+            self.tokenizer = None
+            self.model = None
     
     def analyze(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Analyze context for potential threats."""
@@ -147,33 +161,37 @@ class ThreatAnalyzer:
                 text = features["speech"]["text"]
                 if text:
                     # Tokenize text
-                    inputs = self.tokenizer(
-                        text,
-                        return_tensors="pt",
-                        padding=True,
-                        truncation=True,
-                        max_length=512
-                    )
-                    
-                    # Move inputs to device
-                    if self.config.device == "cuda" and torch.cuda.is_available():
-                        inputs = {k: v.to("cuda") for k, v in inputs.items()}
-                    
-                    # Get predictions
-                    with torch.no_grad():
-                        outputs = self.model(**inputs)
-                        probs = torch.softmax(outputs.logits, dim=1)
-                    
-                    # Check for threats
-                    for i, prob in enumerate(probs[0]):
-                        if prob >= self.config.confidence_threshold:
-                            threats.append({
-                                "type": "text",
-                                "category": self.config.threat_categories[i],
-                                "confidence": float(prob),
-                                "text": text,
-                                "timestamp": time.time()
-                            })
+                        if not self.tokenizer or not self.model:
+                            # Transformers not available; skip text-based threat analysis
+                            pass
+                        else:
+                            inputs = self.tokenizer(
+                                text,
+                                return_tensors="pt",
+                                padding=True,
+                                truncation=True,
+                                max_length=512
+                            )
+
+                            # Move inputs to device
+                            if self.config.device == "cuda" and torch.cuda.is_available():
+                                inputs = {k: v.to("cuda") for k, v in inputs.items()}
+
+                            # Get predictions
+                            with torch.no_grad():
+                                outputs = self.model(**inputs)
+                                probs = torch.softmax(outputs.logits, dim=1)
+
+                            # Check for threats
+                            for i, prob in enumerate(probs[0]):
+                                if prob >= self.config.confidence_threshold:
+                                    threats.append({
+                                        "type": "text",
+                                        "category": self.config.threat_categories[i],
+                                        "confidence": float(prob),
+                                        "text": text,
+                                        "timestamp": time.time()
+                                    })
             
             # Analyze visual threats
             if "objects" in features:

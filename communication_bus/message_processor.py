@@ -1,14 +1,163 @@
 import asyncio
-import json
 import logging
-from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
-from structlog import get_logger
+try:
+    from structlog import get_logger
+    logger = get_logger()
+except ImportError:
+    logger = logging.getLogger(__name__)  # type: ignore
 
-from .config import settings
+try:
+    from .config import settings
+except ImportError:
+    class _S:  # type: ignore
+        MESSAGE_PROCESSING_INTERVAL = 1
+    settings = _S()
 
-logger = get_logger()
+
+class MessageProcessor:
+    """Validates, transforms, and processes messages per topic."""
+
+    def __init__(self) -> None:
+        self.processors: Dict[str, List[Callable]] = {}
+        self.transformers: Dict[str, List[Callable]] = {}
+        self.validators: Dict[str, List[Callable]] = {}
+        self._process_task: Optional[asyncio.Task] = None
+        self._initialized = False
+        self.is_running = False
+
+    async def initialize(self) -> None:
+        if self._initialized:
+            return
+        logger.info("message_processor.initializing")
+        self._register_default_processors()
+        self.is_running = True
+        # Store task reference — prevents GC on Python 3.11+
+        self._process_task = asyncio.create_task(
+            self._housekeeping_loop(), name="message_processor.housekeeping"
+        )
+        self._initialized = True
+        logger.info("message_processor.initialized")
+
+    async def shutdown(self) -> None:
+        logger.info("message_processor.shutting_down")
+        self.is_running = False
+        if self._process_task and not self._process_task.done():
+            self._process_task.cancel()
+            try:
+                await self._process_task
+            except asyncio.CancelledError:
+                pass
+        self._initialized = False
+        logger.info("message_processor.stopped")
+
+    async def process_messages(self) -> None:
+        """Public alias called as a background task from main.py."""
+        await self._housekeeping_loop()
+
+    async def _housekeeping_loop(self) -> None:
+        """Periodic housekeeping — exits cleanly when is_running is False."""
+        while self.is_running:
+            try:
+                await asyncio.sleep(settings.MESSAGE_PROCESSING_INTERVAL)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("message_processor.housekeeping_error", error=str(exc))
+                await asyncio.sleep(1)
+
+    def _register_default_processors(self) -> None:
+        for topic in ("agent-communication", "system-events", "health-metrics", "task-updates"):
+            self.register_validator(topic, self._validate_has_timestamp)
+            self.register_transformer(topic, self._stamp_processed_at)
+
+    def register_processor(self, topic: str, processor: Callable) -> None:
+        self.processors.setdefault(topic, []).append(processor)
+
+    def register_transformer(self, topic: str, transformer: Callable) -> None:
+        self.transformers.setdefault(topic, []).append(transformer)
+
+    def register_validator(self, topic: str, validator: Callable) -> None:
+        self.validators.setdefault(topic, []).append(validator)
+
+    async def process_message(self, topic: str, message: Dict) -> Optional[Dict]:
+        if not self._initialized:
+            raise RuntimeError("MessageProcessor not initialized")
+        try:
+            if not await self._validate_message(topic, message):
+                logger.warning("message_processor.validation_failed", topic=topic)
+                return None
+            transformed = await self._transform_message(topic, message)
+            if transformed is None:
+                return None
+            return await self._apply_processors(topic, transformed)
+        except Exception as exc:
+            logger.error("message_processor.process_error", topic=topic, error=str(exc))
+            return None
+
+    async def _validate_message(self, topic: str, message: Dict) -> bool:
+        for validator in self.validators.get(topic, []):
+            try:
+                result = validator(message)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if not result:
+                    return False
+            except Exception as exc:
+                logger.error("message_processor.validator_error", topic=topic, error=str(exc))
+                return False
+        return True
+
+    async def _transform_message(self, topic: str, message: Dict) -> Optional[Dict]:
+        transformed = dict(message)
+        for transformer in self.transformers.get(topic, []):
+            try:
+                result = transformer(transformed)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if result is None:
+                    return None
+                transformed = result
+            except Exception as exc:
+                logger.error("message_processor.transformer_error", topic=topic, error=str(exc))
+                return None
+        return transformed
+
+    async def _apply_processors(self, topic: str, message: Dict) -> Optional[Dict]:
+        processed = dict(message)
+        for processor in self.processors.get(topic, []):
+            try:
+                result = processor(processed)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if result is None:
+                    return None
+                processed = result
+            except Exception as exc:
+                logger.error("message_processor.processor_error", topic=topic, error=str(exc))
+                return None
+        return processed
+
+    # Default validator — only requires a timestamp field
+    def _validate_has_timestamp(self, message: Dict) -> bool:
+        return "timestamp" in message
+
+    # Default transformer — stamps processed_at
+    def _stamp_processed_at(self, message: Dict) -> Dict:
+        out = dict(message)
+        out["processed_at"] = datetime.utcnow().isoformat()
+        return out
+
+    async def get_status(self) -> Dict:
+        return {
+            "initialized": self._initialized,
+            "topics_with_processors": len(self.processors),
+            "topics_with_transformers": len(self.transformers),
+            "topics_with_validators": len(self.validators),
+        }
+
 
 class MessageProcessor:
     """Processes and transforms messages in the communication bus."""

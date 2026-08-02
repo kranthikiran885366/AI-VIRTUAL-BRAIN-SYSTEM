@@ -7,22 +7,30 @@ import json
 
 from structlog import get_logger
 
-from ...config import settings
+try:
+    from .config import settings
+except Exception:
+    settings = None  # type: ignore
 
 logger = get_logger()
 
+_DEFAULT_MAX_HISTORY = 1000
+_DEFAULT_RULES_PATH = "data/memory_automation_rules.json"
+
+
 class MemoryAutomation:
     """Memory automation component for the Memory Agent."""
-    
+
     def __init__(self):
         """Initialize the memory automation component."""
         self.automation_rules: Dict[str, Dict] = {}
         self.rule_handlers: Dict[str, Callable] = {}
         self.execution_history: List[Dict] = []
-        self.max_history = settings.MEMORY_AUTOMATION_HISTORY_SIZE
+        self.max_history = getattr(settings, "MEMORY_AUTOMATION_HISTORY_SIZE", _DEFAULT_MAX_HISTORY)
+        self._rules_path = getattr(settings, "MEMORY_AUTOMATION_RULES_PATH", _DEFAULT_RULES_PATH)
         self._initialized = False
         self._running = False
-        self._memory_queue = asyncio.Queue()
+        self._memory_queue: asyncio.Queue = asyncio.Queue()
     
     async def initialize(self):
         """Initialize the memory automation component."""
@@ -72,16 +80,20 @@ class MemoryAutomation:
     async def _load_rules(self):
         """Load automation rules from storage."""
         try:
-            with open(settings.MEMORY_AUTOMATION_RULES_PATH, "r") as f:
+            with open(self._rules_path, "r") as f:
                 self.automation_rules = json.load(f)
             logger.info(f"Loaded {len(self.automation_rules)} automation rules")
         except FileNotFoundError:
             logger.info("No existing automation rules found")
-    
+        except Exception as e:
+            logger.error(f"Failed to load automation rules: {e}")
+
     async def _save_rules(self):
         """Save automation rules to storage."""
         try:
-            with open(settings.MEMORY_AUTOMATION_RULES_PATH, "w") as f:
+            import os
+            os.makedirs(os.path.dirname(self._rules_path) or ".", exist_ok=True)
+            with open(self._rules_path, "w") as f:
                 json.dump(self.automation_rules, f, indent=2)
             logger.info(f"Saved {len(self.automation_rules)} automation rules")
         except Exception as e:

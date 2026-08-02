@@ -4,7 +4,13 @@ import time
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
-from transformers import CLIPProcessor, CLIPModel
+try:
+    from transformers import CLIPProcessor, CLIPModel
+    _HAS_TRANSFORMERS = True
+except Exception:
+    CLIPProcessor = None
+    CLIPModel = None
+    _HAS_TRANSFORMERS = False
 
 @dataclass
 class FusionConfig:
@@ -33,13 +39,21 @@ class FusionModule:
     
     def _init_models(self):
         """Initialize fusion models."""
-        # Initialize CLIP model for cross-modal alignment
-        self.clip_processor = CLIPProcessor.from_pretrained(self.config.model_path)
-        self.clip_model = CLIPModel.from_pretrained(self.config.model_path)
-        
-        # Move model to specified device
-        if self.config.device == "cuda" and torch.cuda.is_available():
-            self.clip_model = self.clip_model.to("cuda")
+        # Initialize CLIP model for cross-modal alignment if available
+        if _HAS_TRANSFORMERS and CLIPProcessor and CLIPModel:
+            try:
+                self.clip_processor = CLIPProcessor.from_pretrained(self.config.model_path)
+                self.clip_model = CLIPModel.from_pretrained(self.config.model_path)
+                # Move model to specified device
+                if self.config.device == "cuda" and torch.cuda.is_available():
+                    self.clip_model = self.clip_model.to("cuda")
+            except Exception as e:
+                self.logger.error(f"Error initializing CLIP models: {e}")
+                self.clip_processor = None
+                self.clip_model = None
+        else:
+            self.clip_processor = None
+            self.clip_model = None
     
     def fuse(self, visual_data: Dict[str, Any], audio_data: Dict[str, Any]) -> Dict[str, Any]:
         """Fuse visual and audio data."""
@@ -171,6 +185,10 @@ class FusionModule:
                 image = None
             
             if text and image:
+                # If CLIP is not available, skip heavy alignment
+                if not self.clip_processor or not self.clip_model:
+                    return {}
+
                 # Process inputs with CLIP
                 inputs = self.clip_processor(
                     text=[text],
@@ -178,20 +196,20 @@ class FusionModule:
                     return_tensors="pt",
                     padding=True
                 )
-                
+
                 # Move inputs to device
                 if self.config.device == "cuda" and torch.cuda.is_available():
                     inputs = {k: v.to("cuda") for k, v in inputs.items()}
-                
+
                 # Get embeddings
                 outputs = self.clip_model(**inputs)
-                
+
                 # Calculate similarity
                 similarity = torch.nn.functional.cosine_similarity(
                     outputs.text_embeds,
                     outputs.image_embeds
                 ).item()
-                
+
                 alignment = {
                     "similarity": similarity,
                     "aligned": similarity >= self.config.confidence_threshold

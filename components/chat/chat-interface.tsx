@@ -29,6 +29,8 @@ import { ChatInput } from "./chat-input"
 import { TypingIndicator } from "./typing-indicator"
 import { CognitiveLoop } from "@/components/dashboard/cognitive-loop"
 import { BrainNetwork } from "@/components/dashboard/brain-network"
+import { MemoriesPanel } from "@/components/dashboard/memories-panel"
+import { TasksPanel } from "@/components/dashboard/tasks-panel"
 import { cn } from "@/lib/utils"
 import type { Conversation, Message } from "@/types"
 
@@ -104,7 +106,7 @@ export function ChatInterface({
           messages,
           conversationId: id,
           userId,
-          model: "openai/gpt-4o",
+          model: "gpt-4o",
         },
       }),
     }),
@@ -398,6 +400,8 @@ export function ChatInterface({
           <div className="space-y-4">
             <CognitiveLoop isProcessing={isLoading} />
             <BrainNetwork compact />
+            <MemoriesPanel userId={userId} />
+            <TasksPanel userId={userId} />
           </div>
         </div>
       )}

@@ -1,6 +1,11 @@
 from typing import Optional
-from pydantic import BaseSettings, validator
 import os
+
+try:
+    from pydantic_settings import BaseSettings
+    from pydantic import field_validator
+except ImportError:
+    from pydantic import BaseSettings, validator as field_validator  # type: ignore
 
 class MemoryAgentSettings(BaseSettings):
     """Settings for the Memory Agent."""
@@ -58,14 +63,22 @@ class MemoryAgentSettings(BaseSettings):
     API_GATEWAY_URL: str = "http://localhost:8000"
     ORCHESTRATOR_URL: str = "http://localhost:8001"
     
-    @validator("LONG_TERM_MEMORY_STORAGE_PATH", "MEMORY_STORE_PATH")
+    TASK_AGENT_URL: str = os.environ.get("TASK_AGENT_URL", "http://localhost:8001")
+    EMOTION_AGENT_URL: str = os.environ.get("EMOTION_AGENT_URL", "http://localhost:8001")
+    MEMORY_AGENT_HOST: str = "0.0.0.0"
+    MEMORY_AGENT_PORT: int = 8002
+    DEBUG: bool = False
+
+    @field_validator("LONG_TERM_MEMORY_STORAGE_PATH", "MEMORY_STORE_PATH")
+    @classmethod
     def validate_storage_paths(cls, v):
         """Validate storage paths."""
         # Create directory if it doesn't exist
         os.makedirs(v, exist_ok=True)
         return v
     
-    @validator("KAFKA_TOPICS")
+    @field_validator("KAFKA_TOPICS")
+    @classmethod
     def validate_kafka_topics(cls, v):
         """Validate Kafka topics."""
         if not isinstance(v, list):

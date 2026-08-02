@@ -1,252 +1,205 @@
-import logging
-import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
-import yaml
-from pathlib import Path
+"""
+EmotionDetector — Production implementation with lazy imports.
+
+Backends (in priority order):
+  1. SpeechBrain  — speechbrain/emotion-recognition-wav2vec2-IEMOCAP
+  2. librosa acoustic features → hand-crafted rule classifier
+     (energy, ZCR, spectral centroid, spectral rolloff → 4 emotion buckets)
+"""
+
 import asyncio
+import logging
+import math
 import queue
 import threading
-import torch
-import torchaudio
-from speechbrain.pretrained import EncoderClassifier
-import librosa
+import time as _time
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+    np = None  # type: ignore
+
+_DEFAULT_EMOTIONS = ["neutral", "happy", "sad", "angry", "fearful", "disgusted", "surprised"]
+
 
 class EmotionDetector:
-    def __init__(self, config_path: str = "config/ear_agent_config.yaml"):
+    """Detects emotion from audio using SpeechBrain (primary) or acoustic features (fallback)."""
+
+    def __init__(self, config: Dict[str, Any]):
         self.logger = logging.getLogger(__name__)
-        self.config = self._load_config(config_path)
-        self.emotion_config = self.config.get("emotion_detection", {})
-        
-        # Initialize emotion detection parameters
-        self.model = self.emotion_config.get("model", "speechbrain")
-        self.supported_emotions = self.emotion_config.get("supported_emotions", [])
-        self.confidence_threshold = self.emotion_config.get("confidence_threshold", 0.6)
-        self.window_size = self.emotion_config.get("window_size", 3)
-        
-        # Initialize components
+        self.config = config
+        emotion_cfg = config.get("emotion_detection", {})
+
+        self.model_name: str = emotion_cfg.get("model", "speechbrain")
+        self.supported_emotions: List[str] = emotion_cfg.get("supported_emotions", _DEFAULT_EMOTIONS)
+        self.confidence_threshold: float = float(emotion_cfg.get("confidence_threshold", 0.4))
+        self.sample_rate: int = int(config.get("audio", {}).get("sample_rate", 16000))
+        self._savedir: str = emotion_cfg.get("savedir", "models/emotion-recognition-wav2vec2-IEMOCAP")
+
         self.classifier = None
-        self.processing_queue = queue.Queue()
-        self.is_processing = False
-        self.processing_thread = None
-        
-        # Load model
+        self._backend: str = "acoustic"
+        self.processing_queue: queue.Queue = queue.Queue()
+        self.is_processing: bool = False
+        self.processing_thread: Optional[threading.Thread] = None
+
         self._initialize_model()
-    
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file"""
-        try:
-            config_file = Path(config_path)
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    return yaml.safe_load(f)
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading config: {e}")
-            return {}
-    
+
+    # ─── Model Initialization ─────────────────────────────────────────────────
+
     def _initialize_model(self):
-        """Initialize emotion detection model"""
-        try:
-            if self.model == "speechbrain":
-                # Load SpeechBrain model
+        if self.model_name == "speechbrain" and _HAS_NUMPY:
+            try:
+                try:
+                    from speechbrain.inference.classifiers import EncoderClassifier
+                except ImportError:
+                    from speechbrain.pretrained import EncoderClassifier
+
                 self.classifier = EncoderClassifier.from_hparams(
                     source="speechbrain/emotion-recognition-wav2vec2-IEMOCAP",
-                    savedir="models/emotion-recognition-wav2vec2-IEMOCAP"
+                    savedir=self._savedir,
                 )
-                self.logger.info("Initialized SpeechBrain emotion detection model")
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
-        except Exception as e:
-            self.logger.error(f"Error initializing emotion detection model: {e}")
-            raise
-    
-    async def detect_emotion(self, audio_data: np.ndarray, sample_rate: int = 16000) -> List[Dict[str, Any]]:
-        """Detect emotion in audio data"""
+                self._backend = "speechbrain"
+                self.logger.info("EmotionDetector: loaded SpeechBrain model")
+                return
+            except Exception as e:
+                self.logger.warning(f"EmotionDetector: SpeechBrain load failed — {e}. Using acoustic fallback.")
+
+        if _HAS_NUMPY:
+            self._backend = "acoustic"
+            self.logger.info("EmotionDetector: using acoustic feature fallback")
+        else:
+            self.logger.warning("EmotionDetector: no backend available")
+
+    # ─── Main Detection API ───────────────────────────────────────────────────
+
+    async def detect_emotion(self, audio_data, sample_rate: int = None) -> List[Dict[str, Any]]:
+        sr = sample_rate or self.sample_rate
         try:
-            if self.model == "speechbrain":
-                return await self._detect_speechbrain(audio_data, sample_rate)
-            else:
-                raise ValueError(f"Unsupported model: {self.model}")
-        
+            if self._backend == "speechbrain":
+                return await self._detect_speechbrain(audio_data, sr)
+            return self._detect_acoustic(audio_data, sr)
         except Exception as e:
-            self.logger.error(f"Error detecting emotion: {e}")
+            self.logger.error(f"EmotionDetector.detect_emotion failed: {e}")
             return []
-    
-    async def _detect_speechbrain(self, audio_data: np.ndarray, sample_rate: int) -> List[Dict[str, Any]]:
-        """Detect emotion using SpeechBrain"""
+
+    # ─── SpeechBrain Backend ──────────────────────────────────────────────────
+
+    async def _detect_speechbrain(self, audio_data, sample_rate: int) -> List[Dict[str, Any]]:
         try:
-            # Convert to torch tensor
-            audio_tensor = torch.from_numpy(audio_data).float()
-            
-            # Resample if needed
+            import torch
+            import torchaudio
+            audio_f32 = audio_data.astype(np.float32) / 32768.0
+            audio_tensor = torch.tensor(audio_f32).unsqueeze(0)
+
             if sample_rate != 16000:
-                resampler = torchaudio.transforms.Resample(sample_rate, 16000)
-                audio_tensor = resampler(audio_tensor)
-            
-            # Add batch dimension
-            audio_tensor = audio_tensor.unsqueeze(0)
-            
-            # Get predictions
+                audio_tensor = torchaudio.transforms.Resample(sample_rate, 16000)(audio_tensor)
+
             with torch.no_grad():
                 out_prob, score, index, text_lab = self.classifier.classify_batch(audio_tensor)
-            
-            # Process results
-            results = []
-            for i, (prob, label) in enumerate(zip(out_prob[0], text_lab)):
-                emotion = label.lower()
-                confidence = float(prob)
-                
-                # Only include supported emotions above threshold
-                if emotion in self.supported_emotions and confidence >= self.confidence_threshold:
-                    results.append({
-                        "emotion": emotion,
-                        "confidence": confidence,
-                        "timestamp": asyncio.get_event_loop().time()
-                    })
-            
-            # Sort by confidence
-            results.sort(key=lambda x: x["confidence"], reverse=True)
-            
-            return results
-        
-        except Exception as e:
-            self.logger.error(f"Error in SpeechBrain emotion detection: {e}")
-            return []
-    
-    def start_processing(self, callback: Optional[callable] = None):
-        """Start emotion detection processing"""
-        try:
-            if self.is_processing:
-                self.logger.warning("Already processing")
-                return
-            
-            self.is_processing = True
-            
-            # Start processing thread
-            self.processing_thread = threading.Thread(
-                target=self._process_queue,
-                args=(callback,) if callback else (),
-                daemon=True
-            )
-            self.processing_thread.start()
-            
-            self.logger.info("Started emotion detection processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error starting emotion detection: {e}")
-            self.is_processing = False
-            raise
-    
-    def stop_processing(self):
-        """Stop emotion detection processing"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.is_processing = False
-            
-            if self.processing_thread:
-                self.processing_thread.join(timeout=5)
-                self.processing_thread = None
-            
-            self.logger.info("Stopped emotion detection processing")
-        
-        except Exception as e:
-            self.logger.error(f"Error stopping emotion detection: {e}")
-            raise
-    
-    def _process_queue(self, callback: Optional[callable] = None):
-        """Process audio data from queue"""
-        try:
-            while self.is_processing:
-                try:
-                    # Get audio data from queue
-                    audio_data = self.processing_queue.get(timeout=1)
-                    
-                    # Detect emotion
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    results = loop.run_until_complete(
-                        self.detect_emotion(audio_data["audio"])
-                    )
-                    loop.close()
-                    
-                    # Call callback if provided
-                    if callback and results:
-                        callback({
-                            "results": results,
-                            "timestamp": audio_data["timestamp"]
-                        })
-                    
-                    self.processing_queue.task_done()
-                
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    self.logger.error(f"Error processing audio: {e}")
-        
-        except Exception as e:
-            self.logger.error(f"Error in emotion detection thread: {e}")
-    
-    def add_audio_data(self, audio_data: np.ndarray, timestamp: float):
-        """Add audio data to processing queue"""
-        try:
-            if not self.is_processing:
-                return
-            
-            self.processing_queue.put({
-                "audio": audio_data,
-                "timestamp": timestamp
-            })
-        
-        except Exception as e:
-            self.logger.error(f"Error adding audio data: {e}")
-    
-    def get_supported_emotions(self) -> List[str]:
-        """Get list of supported emotions"""
-        return self.supported_emotions.copy()
-    
-    def set_confidence_threshold(self, threshold: float):
-        """Set confidence threshold for emotion detection"""
-        try:
-            if not 0 <= threshold <= 1:
-                raise ValueError("Confidence threshold must be between 0 and 1")
-            
-            self.confidence_threshold = threshold
-            self.logger.info(f"Set confidence threshold to {threshold}")
-        
-        except Exception as e:
-            self.logger.error(f"Error setting confidence threshold: {e}")
-            raise
-    
-    def cleanup(self):
-        """Clean up resources"""
-        try:
-            self.stop_processing()
-            if self.classifier:
-                del self.classifier
-        except Exception as e:
-            self.logger.error(f"Error cleaning up emotion detector: {e}")
 
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Test emotion detector
-    async def test_detector():
-        detector = EmotionDetector()
+            results: List[Dict[str, Any]] = []
+            ts = datetime.utcnow().isoformat()
+            for prob_val, label in zip(out_prob[0].tolist(), text_lab):
+                emotion = label.lower().strip()
+                confidence = round(float(prob_val), 4)
+                if confidence >= self.confidence_threshold:
+                    results.append({"emotion": emotion, "confidence": confidence, "timestamp": ts})
+
+            results.sort(key=lambda x: x["confidence"], reverse=True)
+            return results
+        except Exception as e:
+            self.logger.error(f"EmotionDetector: SpeechBrain inference failed: {e}")
+            return self._detect_acoustic(audio_data, sample_rate)
+
+    # ─── Acoustic Feature Fallback ────────────────────────────────────────────
+
+    def _detect_acoustic(self, audio_data, sample_rate: int) -> List[Dict[str, Any]]:
         try:
-            # Test with dummy audio data
-            audio_data = np.zeros(16000, dtype=np.int16)  # 1 second of silence
-            results = await detector.detect_emotion(audio_data)
-            print("Emotion detection results:")
-            for result in results:
-                print(f"- {result['emotion']}: {result['confidence']:.2f}")
-        finally:
-            detector.cleanup()
-    
-    asyncio.run(test_detector()) 
+            if _HAS_NUMPY and audio_data is not None and len(audio_data) > 0:
+                audio_f32 = audio_data.astype(np.float32) / 32768.0
+            else:
+                return []
+
+            rms = float(np.sqrt(np.mean(audio_f32 ** 2)))
+            zcr = float(np.mean(np.abs(np.diff(np.sign(audio_f32)))) / 2)
+
+            spec_centroid = 0.0
+            try:
+                import librosa
+                sc = librosa.feature.spectral_centroid(y=audio_f32, sr=sample_rate)
+                spec_centroid = float(np.mean(sc))
+            except Exception:
+                pass
+
+            ts = datetime.utcnow().isoformat()
+
+            if rms < 0.01:
+                return [{"emotion": "neutral", "confidence": 0.80, "timestamp": ts}]
+
+            if rms > 0.15 and zcr > 0.15:
+                emotion, conf = "angry", round(min(0.90, 0.55 + rms * 2.0), 3)
+            elif rms > 0.10 and spec_centroid > 3000:
+                emotion, conf = "happy", round(min(0.88, 0.50 + rms * 1.5), 3)
+            elif rms < 0.04 and zcr < 0.05:
+                emotion, conf = "sad", round(min(0.85, 0.50 + (0.04 - rms) * 10), 3)
+            else:
+                emotion, conf = "neutral", round(min(0.82, 0.55 + rms), 3)
+
+            return [{"emotion": emotion, "confidence": conf, "timestamp": ts}]
+        except Exception as e:
+            self.logger.error(f"EmotionDetector: acoustic fallback failed: {e}")
+            return []
+
+    # ─── Processing Thread ────────────────────────────────────────────────────
+
+    def start_processing(self, callback: Optional[Callable] = None):
+        if self.is_processing:
+            return
+        self.is_processing = True
+        self.processing_thread = threading.Thread(
+            target=self._processing_loop, args=(callback,), daemon=True
+        )
+        self.processing_thread.start()
+        self.logger.info("EmotionDetector: processing thread started")
+
+    def stop_processing(self):
+        self.is_processing = False
+        if self.processing_thread:
+            self.processing_thread.join(timeout=5)
+            self.processing_thread = None
+
+    def _processing_loop(self, callback: Optional[Callable]):
+        while self.is_processing:
+            try:
+                item = self.processing_queue.get(timeout=1.0)
+                results = asyncio.run(self.detect_emotion(item["audio"]))
+                for r in results:
+                    r["audio_timestamp"] = item["timestamp"]
+                    if callback:
+                        callback(r)
+                self.processing_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.logger.error(f"EmotionDetector: processing loop error: {e}")
+
+    def add_audio_data(self, audio_data, timestamp: float):
+        if not self.is_processing:
+            return
+        self.processing_queue.put({"audio": audio_data, "timestamp": timestamp})
+
+    def get_supported_emotions(self) -> List[str]:
+        return list(self.supported_emotions)
+
+    def set_confidence_threshold(self, threshold: float):
+        if not 0 <= threshold <= 1:
+            raise ValueError("Confidence threshold must be between 0 and 1")
+        self.confidence_threshold = threshold
+
+    def cleanup(self):
+        self.stop_processing()
+        self.classifier = None

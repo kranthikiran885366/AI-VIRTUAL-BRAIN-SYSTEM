@@ -1,236 +1,133 @@
 """
 Virtual Brain System Orchestrator Startup Script
-
-This script initializes and starts all orchestrator components:
-1. Message broker for agent communication
-2. Agent lifecycle manager for health monitoring
-3. All specialized agents
-4. API integration server for frontend communication
+Initializes all components and starts the API server.
+Works without Kafka or PostgreSQL.
 """
 
 import asyncio
 import logging
+import logging.handlers
 import sys
+import os
 import signal
 from pathlib import Path
 
-# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from orchestrator.agent_communication import (
-    initialize_message_broker,
-    shutdown_message_broker,
-    get_message_broker,
-)
-from orchestrator.agent_lifecycle import (
-    initialize_lifecycle_manager,
-    shutdown_lifecycle_manager,
-    get_lifecycle_manager,
-)
-from orchestrator.agent_manager import AgentManager
-from orchestrator.api_integration import APIIntegration
-from config import settings
+# ─── Directories ──────────────────────────────────────────────────────────────
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/orchestrator.log'),
-        logging.StreamHandler()
-    ]
-)
+os.makedirs("logs", exist_ok=True)
+os.makedirs("data", exist_ok=True)
 
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+def _configure_logging(log_level: str = "INFO") -> None:
+    """Configure production-grade rotating file + stream logging."""
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        "logs/orchestrator.log",
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    file_handler.setLevel(level)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    stream_handler.setLevel(level)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    # Avoid duplicate handlers if called more than once
+    if not root.handlers:
+        root.addHandler(file_handler)
+        root.addHandler(stream_handler)
+    else:
+        root.handlers.clear()
+        root.addHandler(file_handler)
+        root.addHandler(stream_handler)
+
+
+# Bootstrap logging before importing anything else
+_configure_logging()
 logger = logging.getLogger(__name__)
 
-# Global references for cleanup
-message_broker = None
-lifecycle_manager = None
-agent_manager = None
-api_server = None
+
+# ─── Startup Validation ───────────────────────────────────────────────────────
+
+def _validate_environment() -> None:
+    """Validate critical environment requirements before starting the server."""
+    from orchestrator.config import settings
+
+    report = settings.validate_runtime()
+    if report["warnings"]:
+        for w in report["warnings"]:
+            logger.warning(f"Config warning: {w}")
+    if not report["ok"]:
+        for e in report["errors"]:
+            logger.error(f"Config error: {e}")
+        raise RuntimeError(
+            "Orchestrator configuration is invalid. Fix the errors above before starting."
+        )
+
+    # Reconfigure logging now that settings are loaded
+    _configure_logging(settings.LOG_LEVEL)
+    logger.info(f"Configuration validated (version={report.get('version', 'unknown')})")
 
 
-async def initialize_orchestrator():
-    """Initialize all orchestrator components."""
-    global message_broker, lifecycle_manager, agent_manager, api_server
-    
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+async def main() -> None:
+    """Start the orchestrator via uvicorn."""
+    import uvicorn
+    from orchestrator.config import settings
+
+    _validate_environment()
+
     logger.info("=" * 60)
-    logger.info("Starting Virtual Brain Orchestrator")
+    logger.info("AI Virtual Brain Orchestrator")
+    logger.info(f"Starting on http://{settings.HOST}:{settings.PORT}")
+    logger.info(f"Log level: {settings.LOG_LEVEL}")
+    logger.info(f"Debug mode: {settings.DEBUG}")
     logger.info("=" * 60)
-    
-    try:
-        # Step 1: Initialize message broker
-        logger.info("Step 1: Initializing message broker...")
-        message_broker = await initialize_message_broker()
-        logger.info("✓ Message broker initialized and running")
-        
-        # Step 2: Initialize lifecycle manager
-        logger.info("Step 2: Initializing lifecycle manager...")
-        lifecycle_manager = await initialize_lifecycle_manager()
-        logger.info("✓ Lifecycle manager initialized and running")
-        
-        # Step 3: Initialize agent manager
-        logger.info("Step 3: Initializing agent manager...")
-        # Load configuration (placeholder - would come from YAML)
-        agent_config = {
-            "agents": {
-                "orchestrator_agent": {},
-                "memory_agent": {"dependencies": {}},
-                "emotion_agent": {"dependencies": {}},
-                "decision_agent": {"dependencies": {}},
-                "learning_agent": {"dependencies": {}},
-                "task_agent": {"dependencies": {}},
-                "creativity_agent": {"dependencies": {}},
-                "reasoning_agent": {"dependencies": {}},
-                "perception_agent": {"dependencies": {}},
-                "social_agent": {"dependencies": {}},
-                "language_agent": {"dependencies": {}},
-                "planning_agent": {"dependencies": {}},
-                "motivation_agent": {"dependencies": {}},
-                "ethics_agent": {"dependencies": {}},
-            },
-            "monitor_interval": 30
-        }
-        
-        agent_manager = AgentManager(agent_config)
-        logger.info("✓ Agent manager initialized")
-        
-        # Step 4: Initialize API integration server
-        logger.info("Step 4: Initializing API integration server...")
-        api_server = APIIntegration(agent_manager, port=8001)
-        logger.info("✓ API integration server ready on port 8001")
-        
-        logger.info("=" * 60)
-        logger.info("Orchestrator initialization complete!")
-        logger.info("=" * 60)
-        logger.info(f"Message Broker: {message_broker}")
-        logger.info(f"Lifecycle Manager: {lifecycle_manager}")
-        logger.info(f"Agent Manager: {agent_manager}")
-        logger.info(f"API Server: {api_server.port}")
-        logger.info("=" * 60)
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"Failed to initialize orchestrator: {e}", exc_info=True)
-        return False
 
+    config = uvicorn.Config(
+        "orchestrator.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=False,
+        log_level=settings.LOG_LEVEL.lower(),
+        access_log=True,
+        # Graceful shutdown timeout
+        timeout_graceful_shutdown=int(settings.SHUTDOWN_TIMEOUT),
+    )
+    server = uvicorn.Server(config)
 
-async def start_orchestrator():
-    """Start the orchestrator and all components."""
-    logger.info("Starting orchestrator components...")
-    
-    try:
-        # Start agent manager (loads agents)
-        await agent_manager.start()
-        
-        # Initialize all agents
-        logger.info("Initializing agents...")
-        agent_count = 0
-        for agent_name in agent_manager.agents.keys():
-            agent_count += 1
-            logger.info(f"  - {agent_name}")
-        
-        logger.info(f"✓ {agent_count} agents initialized")
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"Failed to start orchestrator: {e}", exc_info=True)
-        return False
+    # Forward OS signals to uvicorn for clean shutdown
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, server.handle_exit, sig, None)
+        except (NotImplementedError, RuntimeError):
+            # Windows does not support add_signal_handler for all signals
+            pass
 
-
-async def run_api_server():
-    """Run the API integration server."""
-    try:
-        logger.info("Starting API integration server on 0.0.0.0:8001...")
-        api_server.run(host="0.0.0.0")
-    except Exception as e:
-        logger.error(f"API server error: {e}", exc_info=True)
-
-
-async def shutdown_orchestrator():
-    """Shutdown all orchestrator components gracefully."""
-    logger.info("=" * 60)
-    logger.info("Shutting down Virtual Brain Orchestrator")
-    logger.info("=" * 60)
-    
-    try:
-        # Stop agent manager
-        if agent_manager:
-            logger.info("Stopping agent manager...")
-            await agent_manager.stop()
-        
-        # Shutdown lifecycle manager
-        if lifecycle_manager:
-            logger.info("Shutting down lifecycle manager...")
-            await shutdown_lifecycle_manager()
-        
-        # Shutdown message broker
-        if message_broker:
-            logger.info("Shutting down message broker...")
-            await shutdown_message_broker()
-        
-        logger.info("=" * 60)
-        logger.info("Orchestrator shutdown complete")
-        logger.info("=" * 60)
-    
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}", exc_info=True)
-
-
-def handle_signal(signum, frame):
-    """Handle shutdown signals."""
-    logger.info(f"Received signal {signum}")
-    
-    # Run shutdown in event loop
-    try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(shutdown_orchestrator())
-    except Exception as e:
-        logger.error(f"Error handling shutdown signal: {e}")
-    
-    sys.exit(0)
-
-
-async def main():
-    """Main entry point for the orchestrator."""
-    # Register signal handlers
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
-    
-    # Initialize orchestrator
-    success = await initialize_orchestrator()
-    if not success:
-        logger.error("Failed to initialize orchestrator")
-        await shutdown_orchestrator()
-        sys.exit(1)
-    
-    # Start orchestrator
-    success = await start_orchestrator()
-    if not success:
-        logger.error("Failed to start orchestrator")
-        await shutdown_orchestrator()
-        sys.exit(1)
-    
-    # Run API server (blocking)
-    try:
-        await run_api_server()
-    except KeyboardInterrupt:
-        logger.info("Received keyboard interrupt")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
-    finally:
-        await shutdown_orchestrator()
+    await server.serve()
 
 
 if __name__ == "__main__":
-    # Run the main loop
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Orchestrator terminated by user")
+        logger.info("Orchestrator stopped by user")
+    except RuntimeError as e:
+        logger.error(f"Configuration error: {e}")
+        sys.exit(1)
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)

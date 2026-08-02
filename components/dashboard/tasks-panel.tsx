@@ -23,14 +23,21 @@ const statusIcons: Record<string, React.ReactNode> = {
   cancelled: <AlertCircle className="h-4 w-4 text-muted-foreground" />,
 }
 
-export function TasksPanel() {
-  const { data: tasks, mutate } = useSWR<Task[]>("/api/tasks?limit=20", fetcher)
+interface TasksPanelProps {
+  userId?: string
+}
+
+export function TasksPanel({ userId }: TasksPanelProps) {
+  const { data: tasks, mutate } = useSWR<Task[]>(
+    userId ? `/api/tasks?userId=${userId}&limit=20` : null,
+    fetcher
+  )
 
   const handleToggleStatus = async (task: Task) => {
     const newStatus = task.status === "completed" ? "pending" : "completed"
     try {
       await fetch(`/api/tasks/${task.id}`, {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       })

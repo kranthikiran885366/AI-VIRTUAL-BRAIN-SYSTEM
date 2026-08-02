@@ -1,9 +1,30 @@
 import logging
 from typing import Dict, Any, List, Optional
-import numpy as np
 from datetime import datetime
 import json
 import os
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+    class _NpStub:
+        def mean(self, x): return sum(x) / len(x) if x else 0.0
+        def std(self, x): 
+            if not x: return 0.0
+            m = sum(x) / len(x)
+            return (sum((v - m) ** 2 for v in x) / len(x)) ** 0.5
+        def arange(self, n): return list(range(n))
+        def array(self, x): return x
+        def polyfit(self, x, y, deg):
+            if len(x) < 2: return [0.0, 0.0]
+            n = len(x)
+            sx = sum(x); sy = sum(y); sxy = sum(x[i]*y[i] for i in range(n))
+            sx2 = sum(xi**2 for xi in x)
+            slope = (n*sxy - sx*sy) / (n*sx2 - sx**2) if (n*sx2 - sx**2) != 0 else 0.0
+            return [slope, 0.0]
+    np = _NpStub()
 
 class AdaptationEngine:
     def __init__(self, config: Dict[str, Any]):
@@ -150,11 +171,12 @@ class AdaptationEngine:
                 )
                 
                 # Combine metrics with weight
-                evaluation = np.mean([
+                vals = [
                     metrics["relevance"] * 0.4,
                     metrics["effectiveness"] * 0.4,
                     metrics["efficiency"] * 0.2
-                ])
+                ]
+                evaluation = sum(vals) / len(vals)
                 
                 evaluations[strategy] = evaluation
                 

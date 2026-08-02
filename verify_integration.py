@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Any
 import importlib.util
 
+# Ensure project root is on the path
+project_root = Path(__file__).parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -76,7 +81,9 @@ class IntegrationVerifier:
             "orchestrator.decision_engine",
             "orchestrator.health_monitor",
             "agents.base_agent",
-            "config.settings",
+            "orchestrator.config",
+            "agents.creativity_agent.main",
+            "agents.ear_agent.main",
         ]
         
         for module in critical_modules:

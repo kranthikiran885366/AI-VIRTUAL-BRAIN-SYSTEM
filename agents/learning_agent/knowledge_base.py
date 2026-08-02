@@ -1,13 +1,41 @@
 import logging
 from typing import Dict, Any, List, Optional, Set
-import numpy as np
 from datetime import datetime
 import json
 import os
-from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-import nltk
+
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    _HAS_SKLEARN = True
+except ImportError:
+    _HAS_SKLEARN = False
+    TfidfVectorizer = None
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+    class _NpStub:
+        def average(self, a, weights=None):
+            if weights is None: return sum(a)/len(a) if a else 0.0
+            total = sum(weights); return sum(a[i]*weights[i] for i in range(len(a)))/total if total else 0.0
+    np = _NpStub()
+
+try:
+    from nltk.tokenize import word_tokenize
+    from nltk.corpus import stopwords
+    import nltk
+    _HAS_NLTK = True
+except ImportError:
+    _HAS_NLTK = False
+    def word_tokenize(text): return text.lower().split()
+    class _StopWords:
+        def words(self, lang): return []
+    class _NltkStub:
+        def download(self, *a, **kw): pass
+    stopwords = _StopWords()
+    nltk = _NltkStub()
 
 class KnowledgeBase:
     def __init__(self, config: Dict[str, Any]):
@@ -15,20 +43,29 @@ class KnowledgeBase:
         self.logger = logging.getLogger(__name__)
         self.config = config
         self.knowledge = {}
-        self.vectorizer = TfidfVectorizer(
-            max_features=1000,
-            stop_words='english',
-            ngram_range=(1, 2)
-        )
+        # Initialize vectorizer only if sklearn is available
+        self.vectorizer = None
         
         # Initialize NLTK components
-        try:
-            nltk.download('punkt')
-            nltk.download('stopwords')
-            self.stop_words = set(stopwords.words('english'))
-        except Exception as e:
-            self.logger.error(f"Error initializing NLTK: {e}")
+        if _HAS_NLTK:
+            try:
+                nltk.download('punkt', quiet=True)
+                nltk.download('stopwords', quiet=True)
+                self.stop_words = set(stopwords.words('english'))
+            except Exception as e:
+                self.logger.error(f"Error initializing NLTK: {e}")
+                self.stop_words = set()
+        else:
             self.stop_words = set()
+            
+        if _HAS_SKLEARN:
+            self.vectorizer = TfidfVectorizer(
+                max_features=1000,
+                stop_words='english',
+                ngram_range=(1, 2)
+            )
+        else:
+            self.vectorizer = None
             
         # Load existing knowledge if available
         self._load_knowledge()
@@ -42,6 +79,18 @@ class KnowledgeBase:
             if os.path.exists(knowledge_file):
                 with open(knowledge_file, 'r') as f:
                     self.knowledge = json.load(f)
+                # Restore non-serializable types (e.g., convert lists back to sets)
+                for domain, data in list(self.knowledge.items()):
+                    if not isinstance(data, dict):
+                        continue
+                    # Ensure expected keys exist
+                    data.setdefault("concepts", {})
+                    data.setdefault("relationships", [])
+                    for concept, cdata in list(data.get("concepts", {}).items()):
+                        # Convert sources from list to set for in-memory operations
+                        sources = cdata.get("sources")
+                        if isinstance(sources, list):
+                            cdata["sources"] = set(sources)
         except Exception as e:
             self.logger.error(f"Error loading knowledge: {e}")
             
@@ -52,8 +101,23 @@ class KnowledgeBase:
             os.makedirs(data_path, exist_ok=True)
             
             knowledge_file = os.path.join(data_path, "knowledge.json")
+            # Convert non-serializable types (sets) to lists for JSON
+            serializable = {}
+            for domain, data in self.knowledge.items():
+                serializable[domain] = {
+                    "concepts": {},
+                    "relationships": list(data.get("relationships", [])),
+                    "last_update": data.get("last_update")
+                }
+                for concept, cdata in data.get("concepts", {}).items():
+                    cpy = dict(cdata)
+                    sources = cpy.get("sources")
+                    if isinstance(sources, set):
+                        cpy["sources"] = list(sources)
+                    serializable[domain]["concepts"][concept] = cpy
+
             with open(knowledge_file, 'w') as f:
-                json.dump(self.knowledge, f, indent=2)
+                json.dump(serializable, f, indent=2)
         except Exception as e:
             self.logger.error(f"Error saving knowledge: {e}")
             
@@ -116,11 +180,8 @@ class KnowledgeBase:
         try:
             if not concept_data["information"]:
                 return 0.0
-                
-            # Calculate weighted average of information confidence
             confidences = [info["confidence"] for info in concept_data["information"]]
-            weights = [1.0 / (i + 1) for i in range(len(confidences))]  # Recent info weighted more
-            
+            weights = [1.0 / (i + 1) for i in range(len(confidences))]
             return np.average(confidences, weights=weights)
         except Exception as e:
             self.logger.error(f"Error calculating confidence: {e}")
@@ -154,16 +215,11 @@ class KnowledgeBase:
         """Extract related concepts from text."""
         try:
             related = set()
-            
-            # Tokenize text
             tokens = word_tokenize(text.lower())
             tokens = [t for t in tokens if t not in self.stop_words]
-            
-            # Check for known concepts
-            for concept in self.knowledge[domain]["concepts"]:
+            for concept in self.knowledge.get(domain, {}).get("concepts", {}):
                 if concept.lower() in tokens:
                     related.add(concept)
-                    
             return related
         except Exception as e:
             self.logger.error(f"Error extracting related concepts: {e}")
@@ -173,7 +229,21 @@ class KnowledgeBase:
         """Retrieve knowledge from the knowledge base."""
         try:
             if domain:
-                return self.knowledge.get(domain, {})
+                # Return a stable shape even if domain is missing
+                data = self.knowledge.get(domain)
+                if not data:
+                    return {
+                        "concepts": {},
+                        "relationships": [],
+                        "last_update": None
+                    }
+                # Ensure returned dict has expected keys
+                return {
+                    "concepts": data.get("concepts", {}),
+                    "relationships": data.get("relationships", []),
+                    "last_update": data.get("last_update")
+                }
+            # Return full knowledge store
             return self.knowledge
         except Exception as e:
             self.logger.error(f"Error retrieving knowledge: {e}")
@@ -257,12 +327,14 @@ class KnowledgeBase:
     def _calculate_text_similarity(self, text1: str, text2: str) -> float:
         """Calculate similarity between two text strings."""
         try:
-            # Convert texts to TF-IDF vectors
+            if not self.vectorizer:
+                # Fallback: Jaccard on word sets
+                s1 = set(text1.lower().split())
+                s2 = set(text2.lower().split())
+                union = s1 | s2
+                return len(s1 & s2) / len(union) if union else 0.0
             vectors = self.vectorizer.fit_transform([text1, text2])
-            
-            # Calculate cosine similarity
             similarity = (vectors * vectors.T).toarray()[0, 1]
-            
             return float(similarity)
         except Exception as e:
             self.logger.error(f"Error calculating text similarity: {e}")
