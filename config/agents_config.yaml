@@ -81,11 +81,54 @@ language_agent:
   translation_confidence: 0.8
   processing_timeout: 5  # seconds
 
-# Planning Agent Configuration
+# Planning Agent Configuration (Production - Phase 6)
 planning_agent:
+  # Lifecycle
   goal_update_interval: 60  # seconds
   schedule_optimization_interval: 300  # seconds
   max_goals: 100
+  
+  # Planning Engine Configuration
+  max_planning_depth: 4
+  max_task_count: 20
+  max_risks: 10
+  parallel_task_limit: 5
+  
+  # Confidence Thresholds
+  confidence_threshold: 0.55
+  resource_confidence_threshold: 0.6
+  
+  # Risk Management
+  risk_threshold: 0.65
+  high_risk_threshold: 0.7
+  critical_risk_threshold: 0.85
+  
+  # Resource Estimation
+  default_effort_hours: 6
+  high_effort_multiplier: 2.0
+  medium_effort_multiplier: 1.0
+  low_effort_multiplier: 0.5
+  
+  # HTN Planning
+  max_htn_depth: 5
+  cycle_detection_enabled: true
+  
+  # Validation
+  enable_comprehensive_validation: true
+  enable_risk_analysis: true
+  enable_resource_estimation: true
+  
+  # Dynamic Replanning
+  enable_dynamic_replanning: true
+  replan_threshold: 0.3  # Replan if progress deviation > 30%
+  
+  # Execution Monitoring
+  enable_execution_monitoring: true
+  health_check_interval: 60  # seconds
+  
+  # Persistence
+  max_active_plans: 100
+  max_completed_plans_history: 500
 
 # Motivation Agent Configuration
 motivation_agent:
