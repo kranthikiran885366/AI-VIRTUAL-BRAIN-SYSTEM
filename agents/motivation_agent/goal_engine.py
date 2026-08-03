@@ -293,7 +293,7 @@ class GoalEngine:
                 f"(difficulty={goal.difficulty_estimate}, priority={priority})"
             )
             
-            return goal
+            return goal_id
     
     async def get_goal(self, goal_id: str) -> Optional[Goal]:
         """Get a goal by ID."""
