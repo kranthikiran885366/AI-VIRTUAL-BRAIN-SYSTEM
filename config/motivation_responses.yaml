@@ -1,0 +1,185 @@
+# Phase 8: Production Motivation System Configuration
+# Response templates for adaptive motivation generation
+
+motivation_responses:
+  
+  # Low Motivation Responses
+  motivation_low:
+    - "I understand you're feeling unmotivated right now. Let's break this down into smaller, more manageable steps. What's one small thing you could do right now?"
+    - "Feeling low on motivation is natural. Remember why you started this goal. What was that initial spark?"
+    - "Energy is low, I get it. What if we focus on just the next 10 minutes? You might build momentum from there."
+    - "Your motivation dip is temporary. Let's try doing something you enjoy first to build energy, then tackle this."
+    - "Motivation comes and goes. That's normal. The key is action despite low motivation. What's your smallest next step?"
+    - "When motivation is low, focus on the process, not the goal. What's one action you can take today?"
+  
+  # Time Pressure Responses
+  time_pressure:
+    - "Time is tight! Let's focus on the most critical parts first. What's the minimum viable outcome?"
+    - "Deadline pressure? That's a sign this matters. What's the absolute deadline and what can we achieve by then?"
+    - "We're in crunch time. Let's prioritize ruthlessly. What are the top 3 things that must get done?"
+    - "Time pressure can be paralyzing. Let's make a quick action plan for the next hour and execute."
+    - "Racing against the clock - this is when focus matters most. What's non-negotiable to complete?"
+    - "Limited time calls for tough choices. What can you delegate, defer, or delete?"
+  
+  # Unclear Steps Responses
+  unclear_steps:
+    - "Feeling lost on how to proceed? Let's create a roadmap together. What's the first obstacle you see?"
+    - "The path isn't clear yet, and that's okay. What would make the next step obvious?"
+    - "When things feel unclear, research helps. What information do you need to move forward?"
+    - "Let's break this goal into clear, sequential steps. What comes first?"
+    - "Confusion is often a sign you need to zoom in. What's the smallest, clearest next action?"
+    - "Start with information gathering. What do you need to know to move forward?"
+  
+  # Resource Constraint Responses
+  resource_constraint:
+    - "You're missing resources. What's the minimum you need to get started? Can we find alternatives?"
+    - "Resource limitations are real challenges. What can we work with today?"
+    - "Let's be creative within constraints. What resources are actually available to you right now?"
+    - "Missing something important? Sometimes constraints force innovation. What can you do with what you have?"
+    - "Limited resources teach efficiency. What's the leanest path forward?"
+    - "What if we approach this differently with available resources? What becomes possible?"
+  
+  # Skill Gap Responses
+  skill_gap:
+    - "This is a skill you need to develop. What's the best way for you to learn it quickly?"
+    - "You're outside your comfort zone. That's growth! What's one skill you need most?"
+    - "Learning curve ahead. Is there a mentor, course, or resource that could help?"
+    - "New skills take time. What's your plan to level up in this area?"
+    - "Learning-by-doing is often fastest. How can you practice this skill right now?"
+    - "You don't need to be an expert to start. What's the minimum proficiency needed?"
+  
+  # External Blocker Responses
+  external_blocker:
+    - "You're blocked by something external. Who needs to help? Can we unblock this?"
+    - "Sometimes we're at the mercy of others. What leverage do you have?"
+    - "External dependencies are frustrating. What CAN you do right now while you wait?"
+    - "Let's make a plan to handle this dependency. Who do we need to communicate with?"
+    - "While you wait for the blocker to clear, what preparation work can you do?"
+    - "External blockers are tests of patience. How can we work around this?"
+  
+  # Fatigue Responses
+  fatigue:
+    - "You're running on fumes. Maybe it's time to rest first. Your goal will still be there tomorrow."
+    - "Fatigue clouds judgment. What would restore your energy most effectively?"
+    - "Burnout warning. Let's step back and look at your pace. Is this sustainable?"
+    - "Energy is depleted. A real break might serve you better than pushing harder."
+    - "Rest is productive. What would help you recharge?"
+    - "Fatigue is your body telling you something. Listen to it. Take a break."
+  
+  # Distraction Responses
+  distraction:
+    - "Distraction is stealing your focus. What's one thing you can do to minimize interruptions?"
+    - "Your attention is scattered. Let's create one focus block with zero distractions."
+    - "Distractions derail progress. What's the biggest distraction factor right now?"
+    - "Let's protect your focus. What would help you stay on track?"
+    - "Start small: eliminate distractions for just 25 minutes. Can you do that?"
+    - "What's the one distraction that derails you most? How can we eliminate it?"
+  
+  # Doubt Responses
+  doubt:
+    - "Doubt is natural when pursuing worthwhile goals. What would make you feel more confident?"
+    - "You're questioning yourself. What evidence shows you CAN do this?"
+    - "Doubt and fear often accompany growth. What would help you move past this?"
+    - "Let's address the doubt. What specifically are you worried might go wrong?"
+    - "Doubt rarely disappears. It coexists with capability. Keep moving anyway."
+    - "What would need to happen to restore your confidence?"
+
+
+# Difficulty levels for contextual responses
+difficulty_levels:
+  trivial:
+    label: "Straightforward"
+    message: "This is within your grasp. You have the capability."
+    
+  easy:
+    label: "Manageable"
+    message: "This is achievable with focused effort."
+    
+  moderate:
+    label: "Challenging"
+    message: "This requires sustained effort, but you can do it."
+    
+  challenging:
+    label: "Very challenging"
+    message: "This is ambitious. Break it into smaller parts."
+    
+  very_difficult:
+    label: "Extremely challenging"
+    message: "This is a major undertaking. Take it one step at a time."
+
+
+# Emotional state modifiers
+# Adjust responses based on current emotional state
+emotional_modifiers:
+  high_sadness:
+    weight: 1.5
+    message_prepend: "I hear you. This is tough."
+    
+  high_anger:
+    weight: 1.2
+    message_prepend: "Channel that energy productively."
+    
+  high_fear:
+    weight: 1.3
+    message_prepend: "Fear is normal when facing unknowns."
+    
+  high_confidence:
+    weight: 0.8
+    message_append: "Your confidence is an asset - use it wisely."
+
+
+# Response strategy configuration
+strategies:
+  break_down_goal:
+    name: "Break Down Goal"
+    description: "Divide the goal into manageable subgoals"
+    effectiveness_for: ["motivation_low"]
+    
+  prioritize_ruthlessly:
+    name: "Prioritize Ruthlessly"
+    description: "Focus on the vital few, not the trivial many"
+    effectiveness_for: ["time_pressure"]
+    
+  create_roadmap:
+    name: "Create Roadmap"
+    description: "Map out clear, sequential steps"
+    effectiveness_for: ["unclear_steps"]
+    
+  creative_alternatives:
+    name: "Creative Alternatives"
+    description: "Find creative solutions with available resources"
+    effectiveness_for: ["resource_constraint"]
+    
+  accelerated_learning:
+    name: "Accelerated Learning"
+    description: "Rapid skill development through focused practice"
+    effectiveness_for: ["skill_gap"]
+    
+  remove_blocker:
+    name: "Remove Blocker"
+    description: "Address or work around external dependencies"
+    effectiveness_for: ["external_blocker"]
+    
+  strategic_rest:
+    name: "Strategic Rest"
+    description: "Deliberate recovery to restore energy"
+    effectiveness_for: ["fatigue"]
+    
+  protect_focus:
+    name: "Protect Focus"
+    description: "Eliminate distractions and protect attention"
+    effectiveness_for: ["distraction"]
+    
+  build_confidence:
+    name: "Build Confidence"
+    description: "Address doubt through evidence and progress"
+    effectiveness_for: ["doubt"]
+
+
+# Configuration
+configuration:
+  enable_personalization: true
+  enable_difficulty_adaptation: true
+  enable_emotion_awareness: true
+  track_response_effectiveness: true
+  max_response_length_chars: 1000

@@ -1,0 +1,180 @@
+# Phase 8: Production Emotion Engine Configuration
+# This configuration drives all emotion system parameters without hardcoding
+
+emotion_engine:
+  
+  # Decay Configuration
+  # Controls how emotions naturally diminish over time
+  decay:
+    # Base decay rate (intensity reduction per decay cycle)
+    base_rate: 0.1
+    
+    # Contextual factors modify the decay rate
+    contextual_factors:
+      ongoing_stressor: 0.05      # Slower decay if stressor continues
+      recent_success: 0.15         # Faster decay after success
+      external_event: 0.02         # Minimal decay for external events
+      positive_intervention: 0.2   # Faster decay with intervention
+    
+    # Minimum intensity threshold (emotions below this are auto-resolved)
+    min_intensity: 0.05
+    
+    # Decay calculation method: "linear" or "exponential"
+    method: "linear"
+  
+  # Intensity Mapping
+  # Maps qualitative descriptions to quantitative values
+  intensity_mapping:
+    minimal: 0.1
+    mild: 0.3
+    moderate: 0.5
+    strong: 0.7
+    intense: 0.9
+  
+  # State Transition Thresholds
+  # Define when emotions transition between states
+  transitions:
+    # Intensity threshold for activation (PENDING -> ACTIVE)
+    activation_threshold: 0.15
+    
+    # Intensity threshold for decay (ACTIVE -> DECAYING)
+    decay_threshold: 0.40
+    
+    # Intensity threshold for resolution (DECAYING -> RESOLVED)
+    resolution_threshold: 0.02
+    
+    # Maximum time in ACTIVE state before forced transition to DECAYING
+    max_active_duration_seconds: 3600  # 1 hour
+    
+    # Maximum time in DECAYING state before forced resolution
+    max_decaying_duration_seconds: 1800  # 30 minutes
+  
+  # Emotion Type Configuration
+  # Customize behavior for specific emotion types
+  emotion_types:
+    happiness:
+      default_intensity: 0.5
+      decay_multiplier: 1.0
+      context_sensitive: false
+    
+    sadness:
+      default_intensity: 0.3
+      decay_multiplier: 0.8  # Decays slower
+      context_sensitive: true
+    
+    anger:
+      default_intensity: 0.4
+      decay_multiplier: 0.9
+      context_sensitive: true
+    
+    fear:
+      default_intensity: 0.5
+      decay_multiplier: 0.7  # Decays much slower
+      context_sensitive: true
+    
+    surprise:
+      default_intensity: 0.6
+      decay_multiplier: 1.5  # Decays quickly
+      context_sensitive: false
+    
+    confidence:
+      default_intensity: 0.7
+      decay_multiplier: 0.9
+      context_sensitive: false
+    
+    uncertainty:
+      default_intensity: 0.4
+      decay_multiplier: 1.1
+      context_sensitive: true
+    
+    frustration:
+      default_intensity: 0.5
+      decay_multiplier: 0.85
+      context_sensitive: true
+    
+    contentment:
+      default_intensity: 0.6
+      decay_multiplier: 0.95
+      context_sensitive: false
+    
+    anxiety:
+      default_intensity: 0.45
+      decay_multiplier: 0.7
+      context_sensitive: true
+  
+  # Audit and Persistence
+  audit:
+    # Enable detailed audit logging
+    enable_detailed_logging: true
+    
+    # Enable structured logging with correlation IDs
+    enable_correlation_tracking: true
+    
+    # Number of days to retain resolved emotions
+    retention_days: 90
+    
+    # Maximum number of audit entries to keep per emotion
+    max_audit_entries_per_emotion: 1000
+    
+    # Audit events to log (can expand as needed)
+    logged_events:
+      - "emotion_created"
+      - "emotion_activated"
+      - "emotion_decayed"
+      - "emotion_resolved"
+      - "emotion_suppressed"
+      - "state_transition"
+      - "context_updated"
+  
+  # Observability and Metrics
+  observability:
+    # Enable prometheus-style metrics
+    enable_metrics: true
+    
+    # Metrics to collect
+    metrics:
+      - "emotion_creation_count"
+      - "emotion_activation_count"
+      - "state_transition_count"
+      - "emotion_resolution_count"
+      - "average_emotion_duration"
+      - "average_emotion_intensity"
+  
+  # Correlation and Tracing
+  correlation:
+    # Enable correlation ID propagation
+    enable_correlation_ids: true
+    
+    # Track emotion chains (parent-child relationships)
+    track_causation_chains: true
+    
+    # Maximum depth of causation chain to track
+    max_chain_depth: 10
+  
+  # Integration with other agents
+  integration:
+    # Send emotion updates to other agents
+    broadcast_state_changes: true
+    
+    # Receive context from external sources
+    accept_external_context: true
+    
+    # Maximum time to wait for external context
+    external_context_timeout_seconds: 5
+  
+  # Feature Flags
+  features:
+    # Use production state model
+    use_state_machine: true
+    
+    # Use SQLite persistence
+    use_persistence: true
+    
+    # Enable audit trail
+    enable_audit_trail: true
+    
+    # Enable emotion correlation chains
+    enable_correlation_chains: true
+    
+    # Backward compatibility with old JSON storage
+    legacy_json_storage_enabled: false
