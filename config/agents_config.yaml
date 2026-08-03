@@ -33,11 +33,69 @@ task_agent:
   task_timeout: 300  # seconds
   retry_interval: 5  # seconds
 
-# Learning Agent Configuration
+# Learning Agent Configuration (Production - Phase 7)
 learning_agent:
+  # Lifecycle
   knowledge_update_interval: 60  # seconds
   error_correction_threshold: 0.8
   self_improvement_interval: 3600  # seconds
+  learning_interval_seconds: 60
+  
+  # Session Management
+  max_learning_sessions: 100
+  max_session_duration_seconds: 3600
+  
+  # Experience Management
+  max_experiences: 5000
+  max_patterns: 2000
+  experience_retention_days: 30
+  
+  # History and Audit
+  max_history_size: 1000
+  max_knowledge_updates: 1000
+  enable_audit_trail: true
+  
+  # Thresholds
+  quality_threshold: 0.7
+  confidence_threshold: 0.6
+  failure_pattern_threshold: 3
+  improvement_threshold: 0.05
+  
+  # Error Analysis
+  enable_root_cause_analysis: true
+  enable_error_pattern_detection: true
+  
+  # Performance Analysis
+  performance_window_size: 100
+  performance_analysis_interval: 60
+  
+  # Adaptation Engine
+  enable_adaptive_strategies: true
+  adaptation_strategies:
+    - increase_confidence
+    - increase_timeout
+    - optimize_memory
+    - adjust_learning_rate
+    - improve_error_handling
+    - refine_heuristics
+  
+  # Knowledge Management
+  enable_knowledge_validation: true
+  enable_knowledge_versioning: true
+  
+  # Replay Configuration
+  enable_experience_replay: true
+  replay_batch_size: 10
+  replay_priority_enabled: true
+  
+  # Self-Evaluation
+  enable_self_evaluation: true
+  evaluation_interval_seconds: 300
+  
+  # Persistence
+  enable_persistence: true
+  storage_backend: "json"  # json or database
+  knowledge_file: "data/learning/knowledge_base.json"
 
 # Social Agent Configuration
 social_agent:
