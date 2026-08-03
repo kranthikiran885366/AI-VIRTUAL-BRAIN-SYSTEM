@@ -493,7 +493,7 @@ class PlanningAgent(BaseAgent):
                                    f"Total effort: {resources.get('total_effort_hours', 0):.0f} hours, " +
                                    f"Key skills: {', '.join(resources.get('key_skills_needed', []))}",
             "risk_explanation": f"Top risks: {', '.join(top_risks[:3])}. " +
-                               f"Overall risk score: {max(r.get('score', 0) for r in risks):.2f if risks else 0:.2f}",
+                               f"Overall risk score: {round(max((r.get('score', 0) for r in risks), default=0), 2)}",
             "execution_order": execution_order,
             "critical_path": resources.get("critical_path_hours", 0),
             "confidence": round(overall_confidence, 3),
