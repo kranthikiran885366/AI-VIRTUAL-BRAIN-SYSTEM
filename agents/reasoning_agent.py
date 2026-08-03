@@ -7,7 +7,14 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
+
+try:
+    import yaml as _yaml
+    _YAML_AVAILABLE = True
+except ImportError:
+    _YAML_AVAILABLE = False
 
 try:
     from agents.base_agent import BaseAgent
@@ -23,6 +30,23 @@ logger = logging.getLogger(__name__)
 
 _REASONING_VERSION = "5.1.0"
 _REASONING_HISTORY_LIMIT = 2000
+_REASONING_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "reasoning_config.yaml"
+
+
+def _load_reasoning_config() -> Dict[str, Any]:
+    """Load reasoning_config.yaml and flatten into a single-level config dict."""
+    if not _YAML_AVAILABLE or not _REASONING_CONFIG_PATH.exists():
+        return {}
+    try:
+        with open(_REASONING_CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw = _yaml.safe_load(f) or {}
+        flat: Dict[str, Any] = {}
+        for section in ("reasoning", "confidence", "evidence", "contradiction", "performance", "logging"):
+            flat.update(raw.get(section, {}))
+        return flat
+    except Exception as exc:
+        logger.warning("reasoning_config.load_failed path=%s error=%s", _REASONING_CONFIG_PATH, exc)
+        return {}
 
 
 # ─── Reasoning Graph ──────────────────────────────────────────────────────────
@@ -219,6 +243,198 @@ class CausalStrategy(ReasoningStrategy):
         ]
 
 
+class CounterfactualStrategy(ReasoningStrategy):
+    name = "counterfactual"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.78, 0.38 + (evidence[0]["confidence"] if evidence else 0.5) * 0.26)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "counterfactual_condition",
+             "assumptions": assumptions[:1], "evidence_used": ev[:1],
+             "intermediate_result": "Alternate condition defined",
+             "confidence": round(c0, 4), "validation_status": "needs_review",
+             "dependencies": ["counterfactual_rule"], "execution_time_ms": 5},
+            {"step_id": "R2", "input": text[:120], "operation": "impact_projection",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Projected outcome under alternate condition",
+             "confidence": round(c0 * 0.96, 4), "validation_status": "needs_review",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Counterfactual conclusion drafted",
+             "confidence": round(c0 * 0.94, 4), "validation_status": "needs_review",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
+class GoalOrientedStrategy(ReasoningStrategy):
+    name = "goal_oriented"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.88, 0.48 + (evidence[0]["confidence"] if evidence else 0.5) * 0.30)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "goal_definition",
+             "assumptions": assumptions[:1], "evidence_used": ev[:1],
+             "intermediate_result": "Goal and desired outcome stated",
+             "confidence": round(c0, 4), "validation_status": "validated",
+             "dependencies": ["goal_rule"], "execution_time_ms": 4},
+            {"step_id": "R2", "input": text[:120], "operation": "option_evaluation",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Actions evaluated against the goal",
+             "confidence": round(c0 * 0.96, 4), "validation_status": "validated",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "decision_support",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Recommended path selected",
+             "confidence": round(c0 * 0.98, 4), "validation_status": "validated",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
+class ComparativeStrategy(ReasoningStrategy):
+    name = "comparative"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.82, 0.42 + (evidence[0]["confidence"] if evidence else 0.5) * 0.28)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "comparative_baseline",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Comparable properties identified",
+             "confidence": round(c0, 4), "validation_status": "validated",
+             "dependencies": ["comparison_rule"], "execution_time_ms": 4},
+            {"step_id": "R2", "input": text[:120], "operation": "contrast_analysis",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Differences and similarities contrasted",
+             "confidence": round(c0 * 0.96, 4), "validation_status": "needs_review",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Comparative conclusion produced",
+             "confidence": round(c0 * 0.94, 4), "validation_status": "needs_review",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
+class HypothesisStrategy(ReasoningStrategy):
+    name = "hypothesis_generation"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.80, 0.40 + (evidence[0]["confidence"] if evidence else 0.5) * 0.28)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "hypothesis_generation",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Hypothesis candidates generated",
+             "confidence": round(c0, 4), "validation_status": "validated",
+             "dependencies": ["hypothesis_rule"], "execution_time_ms": 4},
+            {"step_id": "R2", "input": text[:120], "operation": "evaluation",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Hypothesis tested against evidence",
+             "confidence": round(c0 * 0.96, 4), "validation_status": "needs_review",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "selection",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Best hypothesis selected",
+             "confidence": round(c0 * 0.94, 4), "validation_status": "needs_review",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
+class HypothesisEvaluationStrategy(ReasoningStrategy):
+    name = "hypothesis_evaluation"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.82, 0.42 + (evidence[0]["confidence"] if evidence else 0.5) * 0.28)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "hypothesis_selection",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Hypothesis under evaluation selected",
+             "confidence": round(c0, 4), "validation_status": "validated",
+             "dependencies": ["hypothesis_rule"], "execution_time_ms": 4},
+            {"step_id": "R2", "input": text[:120], "operation": "evidence_fit_check",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Evidence fit evaluated",
+             "confidence": round(c0 * 0.96, 4), "validation_status": "needs_review",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "verdict",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Hypothesis accepted or rejected",
+             "confidence": round(c0 * 0.94, 4), "validation_status": "needs_review",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
+class EvidenceBasedStrategy(ReasoningStrategy):
+    name = "evidence_based"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.88, 0.46 + (evidence[0]["confidence"] if evidence else 0.5) * 0.30)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "fact_extraction",
+             "assumptions": assumptions[:1], "evidence_used": ev[:1],
+             "intermediate_result": "Facts extracted",
+             "confidence": round(c0, 4), "validation_status": "validated",
+             "dependencies": ["evidence_rule"], "execution_time_ms": 4},
+            {"step_id": "R2", "input": text[:120], "operation": "evidence_weighting",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Evidence prioritized by confidence",
+             "confidence": round(c0 * 0.96, 4), "validation_status": "validated",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "result_packaging",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Structured conclusion packaged",
+             "confidence": round(c0 * 0.98, 4), "validation_status": "validated",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
+class UncertaintyAwareStrategy(ReasoningStrategy):
+    name = "uncertainty_aware"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.72, 0.36 + (evidence[0]["confidence"] if evidence else 0.5) * 0.24)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "uncertainty_identification",
+             "assumptions": assumptions[:1], "evidence_used": ev[:1],
+             "intermediate_result": "Uncertainty source identified",
+             "confidence": round(c0, 4), "validation_status": "validated",
+             "dependencies": ["uncertainty_rule"], "execution_time_ms": 4},
+            {"step_id": "R2", "input": text[:120], "operation": "fallback_reasoning",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Conservative conclusion produced",
+             "confidence": round(c0 * 0.95, 4), "validation_status": "needs_review",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "result_packaging",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Uncertainty disclosure included",
+             "confidence": round(c0 * 0.93, 4), "validation_status": "needs_review",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
+class ProbabilisticStrategy(ReasoningStrategy):
+    name = "probabilistic"
+    def build_chain(self, text, context, evidence, assumptions):
+        ev = [e.get("id") for e in evidence[:2]]
+        c0 = min(0.84, 0.44 + (evidence[0]["confidence"] if evidence else 0.5) * 0.28)
+        return [
+            {"step_id": "R1", "input": text[:120], "operation": "probability_estimation",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Probabilities assigned",
+             "confidence": round(c0, 4), "validation_status": "validated",
+             "dependencies": ["probability_rule"], "execution_time_ms": 4},
+            {"step_id": "R2", "input": text[:120], "operation": "confidence_update",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Posterior confidence updated",
+             "confidence": round(c0 * 0.97, 4), "validation_status": "validated",
+             "dependencies": ["R1"], "execution_time_ms": 4},
+            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation",
+             "assumptions": assumptions[:1], "evidence_used": ev,
+             "intermediate_result": "Probability-aware conclusion drafted",
+             "confidence": round(c0 * 0.95, 4), "validation_status": "needs_review",
+             "dependencies": ["R2"], "execution_time_ms": 4},
+        ]
+
+
 class ConstraintStrategy(ReasoningStrategy):
     name = "constraint"
     def build_chain(self, text, context, evidence, assumptions):
@@ -295,7 +511,9 @@ class ReasoningAgent(BaseAgent):
     """
 
     def __init__(self, agent_id: str = "reasoning_agent", config: Optional[Dict[str, Any]] = None):
-        merged_config = dict(config or {})
+        # Load YAML config first, then overlay caller-supplied overrides
+        file_config = _load_reasoning_config()
+        merged_config = {**file_config, **(config or {})}
         merged_config.setdefault("max_history", _REASONING_HISTORY_LIMIT)
         merged_config.setdefault("max_chain_length", 8)
         merged_config.setdefault("max_reasoning_depth", 4)
@@ -325,31 +543,19 @@ class ReasoningAgent(BaseAgent):
             "by_strategy": {},
         }
         self._confidence_engine = ConfidenceEngine(merged_config) if ConfidenceEngine else None
-        # Pluggable strategy objects (items 2)
+        # Pluggable strategy objects — all 14 strategies registered
         _pluggable: Dict[str, ReasoningStrategy] = {
             s.name: s for s in [
                 DeductiveStrategy(), InductiveStrategy(), AbductiveStrategy(),
-                AnalogicalStrategy(), CausalStrategy(), ConstraintStrategy(),
+                AnalogicalStrategy(), CausalStrategy(), CounterfactualStrategy(),
+                ConstraintStrategy(), GoalOrientedStrategy(), ComparativeStrategy(),
+                HypothesisStrategy(), HypothesisEvaluationStrategy(),
+                EvidenceBasedStrategy(), UncertaintyAwareStrategy(), ProbabilisticStrategy(),
             ]
         }
         self._pluggable_strategies: Dict[str, ReasoningStrategy] = _pluggable
-        # Legacy chain builders kept for strategies not yet migrated
-        self._strategy_registry = {
-            "deductive": self._build_deductive_chain,
-            "inductive": self._build_inductive_chain,
-            "abductive": self._build_abductive_chain,
-            "analogical": self._build_analogical_chain,
-            "causal": self._build_causal_chain,
-            "counterfactual": self._build_counterfactual_chain,
-            "constraint": self._build_constraint_chain,
-            "goal_oriented": self._build_goal_oriented_chain,
-            "comparative": self._build_comparative_chain,
-            "hypothesis_generation": self._build_hypothesis_chain,
-            "hypothesis_evaluation": self._build_hypothesis_chain,
-            "evidence_based": self._build_evidence_chain,
-            "uncertainty_aware": self._build_uncertainty_chain,
-            "probabilistic": self._build_probabilistic_chain,
-        }
+        # Legacy chain builders kept as final fallback only (all strategies now pluggable)
+        self._strategy_registry: Dict[str, Any] = {}
         # Reasoning cache: hash -> result (item 5)
         _cache_size = int(merged_config.get("cache_size", 256))
         self._reasoning_cache: Dict[str, Dict[str, Any]] = {}
@@ -833,31 +1039,6 @@ class ReasoningAgent(BaseAgent):
         idx = max(0, int(len(s) * p / 100) - 1)
         return round(s[min(idx, len(s) - 1)], 2)
 
-    def _build_explanation(self, reasoning_type: str, chain: List[Dict[str, Any]], evidence_score: float, contradictions: List[Dict[str, Any]], text: str) -> Dict[str, Any]:
-        high_level = (
-            f"The {reasoning_type} reasoning pass examined the problem, evaluated the available evidence, "
-            f"and produced a structured conclusion with overall evidence confidence {evidence_score:.3f}."
-        )
-        technical = (
-            f"Chain length={len(chain)}; contradictions={len(contradictions)}; evidence_weight={evidence_score:.3f}; "
-            "execution was deterministic and traceable."
-        )
-        return {
-            "high_level": high_level,
-            "technical": technical,
-            "step_by_step": chain,
-            "supporting_evidence": [step.get("evidence_used", []) for step in chain],
-            "confidence_explanation": f"Confidence propagated through each step and calibrated via configured thresholds.",
-            "uncertainty_explanation": "Uncertainty remains present when evidence is sparse, conflicting, or missing.",
-            "limitations": [
-                "The explanation is bounded by available evidence and reasoning depth.",
-                "If evidence is incomplete, the reasoning remains conservative.",
-            ],
-            "alternative_interpretations": [
-                "An alternate explanation may be needed when evidence conflicts or assumptions are weak.",
-            ],
-        }
-
     async def reason(self, text: str, context: Optional[Dict[str, Any]] = None, evidence: Optional[List[Dict[str, Any]]] = None, memory_context: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         start_time = time.perf_counter()
         self._reasoning_metrics["total_requests"] += 1
@@ -911,8 +1092,21 @@ class ReasoningAgent(BaseAgent):
         self.reasoning_sessions[reasoning_id] = reasoning_session
 
         if not text or not text.strip():
+            self._reasoning_metrics["failed"] += 1
+            self._audit_trail.append({
+                "reasoning_id": reasoning_id,
+                "session_id": session_id,
+                "event": "failed",
+                "reasoning_type": reasoning_type,
+                "reason": "empty_input",
+                "request_id": normalized_context.get("request_id"),
+                "correlation_id": normalized_context.get("correlation_id"),
+                "trace_id": normalized_context.get("trace_id"),
+                "timestamp": datetime.utcnow().isoformat(),
+            })
             return {
                 "reasoning_id": reasoning_id,
+                "session_id": session_id,
                 "reasoning_state": "failed",
                 "reasoning_type": reasoning_type,
                 "context": normalized_context,
@@ -921,7 +1115,12 @@ class ReasoningAgent(BaseAgent):
                     "message": "Reasoning request must include a non-empty problem description.",
                 },
                 "confidence": {"overall": 0.0, "uncertainty": 1.0},
-                "explanation": {"high_level": "The request could not be processed because the problem statement was empty.", "limitations": ["No reasoning could be performed."], "technical": "Validation failed before evidence evaluation.", "step_by_step": []},
+                "explanation": {
+                    "high_level": "The request could not be processed because the problem statement was empty.",
+                    "limitations": ["No reasoning could be performed."],
+                    "technical": "Validation failed before evidence evaluation.",
+                    "step_by_step": [],
+                },
                 "evidence": [],
                 "contradictions": [],
                 "reasoning_chain": [],
