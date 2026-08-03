@@ -761,13 +761,9 @@ class ReasoningAgent(BaseAgent):
         }
 
     def _build_reasoning_chain(self, text: str, reasoning_type: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str], budget: Optional["ResourceBudget"] = None) -> List[Dict[str, Any]]:
-        # Prefer pluggable strategy object; fall back to legacy builder
-        pluggable = self._pluggable_strategies.get(reasoning_type)
-        if pluggable is not None:
-            chain = pluggable.build_chain(text, context, evidence, assumptions)
-        else:
-            legacy = self._strategy_registry.get(reasoning_type)
-            chain = legacy(text, context, evidence, assumptions) if legacy else self._build_evidence_chain(text, context, evidence, assumptions)
+        # All strategies are pluggable; fall back to evidence_based for unknown types
+        pluggable = self._pluggable_strategies.get(reasoning_type) or self._pluggable_strategies.get("evidence_based")
+        chain = pluggable.build_chain(text, context, evidence, assumptions)  # type: ignore[union-attr]
         # Enforce chain length budget
         if budget is not None:
             chain = chain[:budget.max_chain_length]
@@ -783,97 +779,6 @@ class ReasoningAgent(BaseAgent):
                 step["propagated_from"] = round(prev_conf, 4)
                 prev_conf = propagated
         return chain
-
-    def _build_deductive_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "premise_identification", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:1]], "intermediate_result": "Major premise identified", "confidence": 0.72, "validation_status": "validated", "dependencies": ["deductive_rule"], "execution_time_ms": 5},
-            {"step_id": "R2", "input": text[:120], "operation": "logical_connection", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Premises linked through implication", "confidence": 0.69, "validation_status": "validated", "dependencies": ["R1"], "execution_time_ms": 5},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Necessary conclusion derived", "confidence": 0.76, "validation_status": "validated", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_inductive_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "pattern_detection", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Recurring pattern observed", "confidence": 0.66, "validation_status": "validated", "dependencies": ["inductive_rule"], "execution_time_ms": 5},
-            {"step_id": "R2", "input": text[:120], "operation": "generalization", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Pattern generalized into a rule", "confidence": 0.64, "validation_status": "needs_review", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Probable conclusion generated", "confidence": 0.62, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_abductive_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "hypothesis_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Most plausible explanation proposed", "confidence": 0.66, "validation_status": "validated", "dependencies": ["abduction_rule"], "execution_time_ms": 5},
-            {"step_id": "R2", "input": text[:120], "operation": "evidence_fit", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Explanation fits available evidence", "confidence": 0.63, "validation_status": "needs_review", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Best available explanation selected", "confidence": 0.61, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_analogical_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "source_mapping", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Comparable domain structures identified", "confidence": 0.6, "validation_status": "validated", "dependencies": ["analogy_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "transfer", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Relevant analogies transferred", "confidence": 0.58, "validation_status": "needs_review", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Analogical conclusion drafted", "confidence": 0.57, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_causal_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "cause_identification", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Candidate causal trigger identified", "confidence": 0.71, "validation_status": "validated", "dependencies": ["causal_rule"], "execution_time_ms": 5},
-            {"step_id": "R2", "input": text[:120], "operation": "mechanism_analysis", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Causal mechanism mapped", "confidence": 0.67, "validation_status": "validated", "dependencies": ["R1"], "execution_time_ms": 5},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Cause-effect statement produced", "confidence": 0.7, "validation_status": "validated", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_counterfactual_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "counterfactual_condition", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:1]], "intermediate_result": "Alternate condition defined", "confidence": 0.58, "validation_status": "needs_review", "dependencies": ["counterfactual_rule"], "execution_time_ms": 5},
-            {"step_id": "R2", "input": text[:120], "operation": "impact_projection", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Projected outcome under alternate condition", "confidence": 0.56, "validation_status": "needs_review", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Counterfactual conclusion drafted", "confidence": 0.55, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_constraint_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "constraint_extraction", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:1]], "intermediate_result": "Constraints identified", "confidence": 0.72, "validation_status": "validated", "dependencies": ["constraint_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "feasibility_check", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Feasibility evaluated under constraints", "confidence": 0.68, "validation_status": "validated", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Constraint-safe conclusion generated", "confidence": 0.71, "validation_status": "validated", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_goal_oriented_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "goal_definition", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:1]], "intermediate_result": "Goal and desired outcome stated", "confidence": 0.72, "validation_status": "validated", "dependencies": ["goal_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "option_evaluation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Actions evaluated against the goal", "confidence": 0.68, "validation_status": "validated", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "decision_support", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Recommended path selected", "confidence": 0.7, "validation_status": "validated", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_comparative_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "comparative_baseline", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Comparable properties identified", "confidence": 0.63, "validation_status": "validated", "dependencies": ["comparison_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "contrast_analysis", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Differences and similarities contrasted", "confidence": 0.6, "validation_status": "needs_review", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Comparative conclusion produced", "confidence": 0.59, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_hypothesis_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "hypothesis_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Hypothesis candidates generated", "confidence": 0.61, "validation_status": "validated", "dependencies": ["hypothesis_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "evaluation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Hypothesis tested against evidence", "confidence": 0.58, "validation_status": "needs_review", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "selection", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Best hypothesis selected", "confidence": 0.57, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_evidence_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "fact_extraction", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:1]], "intermediate_result": "Facts extracted", "confidence": 0.7, "validation_status": "validated", "dependencies": ["evidence_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "evidence_weighting", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Evidence prioritized by confidence", "confidence": 0.67, "validation_status": "validated", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "result_packaging", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Structured conclusion packaged", "confidence": 0.68, "validation_status": "validated", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_uncertainty_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "uncertainty_identification", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:1]], "intermediate_result": "Uncertainty source identified", "confidence": 0.58, "validation_status": "validated", "dependencies": ["uncertainty_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "fallback_reasoning", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Conservative conclusion produced", "confidence": 0.55, "validation_status": "needs_review", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "result_packaging", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Uncertainty disclosure included", "confidence": 0.54, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
-
-    def _build_probabilistic_chain(self, text: str, context: Dict[str, Any], evidence: List[Dict[str, Any]], assumptions: List[str]) -> List[Dict[str, Any]]:
-        return [
-            {"step_id": "R1", "input": text[:120], "operation": "probability_estimation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Probabilities assigned", "confidence": 0.6, "validation_status": "validated", "dependencies": ["probability_rule"], "execution_time_ms": 4},
-            {"step_id": "R2", "input": text[:120], "operation": "confidence_update", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Posterior confidence updated", "confidence": 0.62, "validation_status": "validated", "dependencies": ["R1"], "execution_time_ms": 4},
-            {"step_id": "R3", "input": text[:120], "operation": "conclusion_generation", "assumptions": assumptions[:1], "evidence_used": [e.get("id") for e in evidence[:2]], "intermediate_result": "Probability-aware conclusion drafted", "confidence": 0.61, "validation_status": "needs_review", "dependencies": ["R2"], "execution_time_ms": 4},
-        ]
 
     def _build_reasoning_graph(self, text: str, evidence: List[Dict[str, Any]], chain: List[Dict[str, Any]], contradictions: List[Dict[str, Any]], assumptions: List[str]) -> ReasoningGraph:
         """Build a DAG from problem → evidence → chain steps → conclusion."""
