@@ -26,9 +26,8 @@ logger = logging.getLogger(__name__)
 
 class AgentManager:
     """Manages the lifecycle and execution of all agents in the system."""
-    
+
     def __init__(self, config: Dict[str, Any], dependency_container: Optional[Dict[str, Any]] = None):
-        """Initialize the agent manager with configuration."""
         self.config = config if isinstance(config, dict) else {}
         self.dependency_container = dependency_container or {}
         self.agents: Dict[str, Any] = {}
@@ -42,6 +41,9 @@ class AgentManager:
         self._monitor_task: Optional[asyncio.Task] = None
         self._registry_lock = asyncio.Lock()
         self._loaded_modules: Dict[str, Any] = {}
+        # Event-driven capability registry subscribers
+        # Callback signature: (event: str, agent_name: str, snapshot: dict) -> None
+        self._registry_subscribers: List[Any] = []
 
     async def execute_agent_task(
         self,
@@ -259,6 +261,7 @@ class AgentManager:
                 self.failure_history.setdefault(agent_name, [])
 
             logger.info(f"Agent {agent_name} loaded successfully")
+            await self._emit_registry_event("agent_loaded", agent_name)
 
         except Exception as e:
             self.agent_status[agent_name] = "error"
@@ -288,6 +291,7 @@ class AgentManager:
                 self.agent_metadata.pop(agent_name, None)
                 self.capability_registry.pop(agent_name, None)
                 self.version_registry.pop(agent_name, None)
+        await self._emit_registry_event("agent_unloaded", agent_name)
         return True
 
     async def reload_agent(self, agent_name: str) -> bool:
@@ -495,6 +499,7 @@ class AgentManager:
 
                     logger.warning(f"Agent {agent_name} health check failed: {health}")
                     await self.restart_agent(agent_name)
+                    await self._emit_registry_event("agent_health_changed", agent_name)
 
                 except Exception as e:
                     logger.error(f"Error monitoring agent {agent_name}: {e}")
@@ -515,6 +520,62 @@ class AgentManager:
         # Start agent
         return await self.start_agent(agent_name)
 
+    def get_capability_snapshot(self) -> Dict[str, Any]:
+        """Return a snapshot of agent availability, capabilities, health, and load."""
+        available: List[str] = [
+            name for name, status in self.agent_status.items()
+            if status not in {"error", "stopped", "shutdown"}
+        ]
+        capabilities: Dict[str, List[str]] = {
+            name: sorted(list(caps))
+            for name, caps in self.capability_registry.items()
+        }
+        health: Dict[str, str] = {
+            name: self.agent_status.get(name, "unknown")
+            for name in self.agents
+        }
+        load: Dict[str, int] = {
+            name: int(stats.get("executions", 0))
+            for name, stats in self.execution_stats.items()
+        }
+        return {
+            "available_agents": available,
+            "agent_capabilities": capabilities,
+            "agent_health": health,
+            "agent_load": load,
+        }
+
+    # ─── Event-driven capability registry ──────────────────────────────────
+
+    def subscribe_registry(self, callback: Any) -> None:
+        """
+        Register a callback invoked whenever the capability registry changes.
+        Signature: callback(event: str, agent_name: str, snapshot: dict) -> None
+        Supports both sync and async callables.
+        """
+        if callback not in self._registry_subscribers:
+            self._registry_subscribers.append(callback)
+
+    def unsubscribe_registry(self, callback: Any) -> None:
+        try:
+            self._registry_subscribers.remove(callback)
+        except ValueError:
+            pass
+
+    async def _emit_registry_event(self, event: str, agent_name: str) -> None:
+        """Notify all subscribers of a registry change (non-blocking, best-effort)."""
+        if not self._registry_subscribers:
+            return
+        snapshot = self.get_capability_snapshot()
+        for cb in list(self._registry_subscribers):
+            try:
+                if asyncio.iscoroutinefunction(cb):
+                    asyncio.create_task(cb(event, agent_name, snapshot))
+                else:
+                    cb(event, agent_name, snapshot)
+            except Exception as exc:
+                logger.debug("agent_manager.registry_event_error event=%s error=%s", event, exc)
+
     async def discover_agents(self) -> List[str]:
         """Discover available agent modules from the agents package."""
         agents_root = Path(__file__).resolve().parents[1] / "agents"
@@ -531,9 +592,6 @@ class AgentManager:
     async def get_failure_history(self, agent_name: str) -> List[Dict[str, Any]]:
         return list(self.failure_history.get(agent_name, []))
 
-    async def get_execution_stats(self, agent_name: str) -> Dict[str, Any]:
-        return dict(self.execution_stats.get(agent_name, {}))
-    
     async def initialize(self):
         """Initialize the agent manager."""
         logger.info("Initializing agent manager...")

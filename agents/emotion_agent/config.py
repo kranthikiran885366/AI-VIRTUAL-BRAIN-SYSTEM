@@ -29,6 +29,8 @@ class EmotionAgentSettings:
     ORCHESTRATOR_URL: str = os.environ.get("ORCHESTRATOR_URL", "http://localhost:8001")
     MEMORY_AGENT_URL: str = os.environ.get("MEMORY_AGENT_URL", "http://localhost:8001")
     TASK_AGENT_URL: str = os.environ.get("TASK_AGENT_URL", "http://localhost:8001")
+    EMOTION_AUTOMATION_HISTORY_SIZE: int = int(os.environ.get("EMOTION_AUTOMATION_HISTORY_SIZE", 500))
+    EMOTION_AUTOMATION_RULES_PATH: str = os.environ.get("EMOTION_AUTOMATION_RULES_PATH", "data/emotion_store/automation_rules.json")
 
     def __init__(self):
         os.makedirs(self.EMOTION_STORE_PATH, exist_ok=True)

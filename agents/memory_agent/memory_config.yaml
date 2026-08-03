@@ -1,0 +1,64 @@
+# Memory Agent — Production Configuration
+# All operational values are defined here.
+# Override any value via environment variable: MEMORY_<UPPER_KEY>
+
+storage:
+  sqlite_path: "data/brain.db"
+  cache_capacity: 2000
+  embedding_model: "all-MiniLM-L6-v2"
+
+  # Hybrid search weights (must sum to 1.0)
+  w_keyword: 0.35
+  w_vector: 0.35
+  w_importance: 0.15
+  w_recency: 0.10
+  w_frequency: 0.05
+
+consolidation:
+  # Importance threshold above which short-term memories are promoted to long-term
+  consolidation_threshold: 0.65
+  # Cosine / keyword similarity above which a new store is treated as a duplicate
+  duplicate_similarity_threshold: 0.90
+  # Seconds between background maintenance sweeps
+  maintenance_interval_seconds: 60.0
+
+retention:
+  working:
+    ttl_seconds: 120.0
+    max_capacity: 500
+    importance_floor: 0.0
+  short_term:
+    ttl_seconds: 600.0
+    max_capacity: 5000
+    importance_floor: 0.0
+  long_term:
+    ttl_seconds: null          # no expiry
+    max_capacity: 100000
+    importance_floor: 0.0
+  episodic:
+    ttl_seconds: null
+    max_capacity: 50000
+    importance_floor: 0.0
+  semantic:
+    ttl_seconds: null
+    max_capacity: 50000
+    importance_floor: 0.0
+  procedural:
+    ttl_seconds: null
+    max_capacity: 10000
+    importance_floor: 0.0
+
+retrieval:
+  default_limit: 10
+  max_limit: 500
+  max_query_length: 2000
+  max_payload_bytes: 65536
+  traversal_max_depth: 3
+
+automation:
+  rules_path: "data/memory_automation_rules.json"
+  max_history: 1000
+
+observability:
+  log_slow_query_ms: 100
+  emit_metrics: true

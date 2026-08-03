@@ -6,6 +6,8 @@ import json
 import logging
 import math
 import sqlite3
+import threading
+import time
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timedelta
@@ -26,6 +28,40 @@ try:
 except Exception:
     SentenceTransformer = None
     _HAS_ST = False
+
+# ── Process-level embedding model singleton ───────────────────────────────────
+# Loading SentenceTransformer inside __init__ on every MemoryStorage instance
+# causes concurrent torch thread-pool access violations on Windows when multiple
+# agents are created in the same process (e.g. during tests).  We load once and
+# share the model + its detected dimension across all instances.
+_EMBEDDING_LOCK = threading.Lock()
+_EMBEDDING_MODEL: Optional[Any] = None   # SentenceTransformer | None
+_EMBEDDING_DIM: int = 768                # updated after first successful load
+_EMBEDDING_LOADED: bool = False          # True once the load attempt has run
+
+
+def _get_embedding_model(model_name: str = "all-MiniLM-L6-v2"):
+    """Return the process-level embedding model, loading it at most once."""
+    global _EMBEDDING_MODEL, _EMBEDDING_DIM, _EMBEDDING_LOADED
+    if _EMBEDDING_LOADED:
+        return _EMBEDDING_MODEL, _EMBEDDING_DIM
+    with _EMBEDDING_LOCK:
+        if _EMBEDDING_LOADED:
+            return _EMBEDDING_MODEL, _EMBEDDING_DIM
+        if _HAS_ST and SentenceTransformer is not None:
+            try:
+                model = SentenceTransformer(model_name)
+                probe = model.encode("probe")
+                dim = int(probe.shape[0]) if hasattr(probe, "shape") else len(probe)
+                _EMBEDDING_MODEL = model
+                _EMBEDDING_DIM = dim
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    f"memory_storage.embedding_model_load_failed error={exc}"
+                )
+                _EMBEDDING_MODEL = None
+        _EMBEDDING_LOADED = True
+    return _EMBEDDING_MODEL, _EMBEDDING_DIM
 
 from .memory_types import (
     EmotionType,
@@ -85,12 +121,16 @@ class MemoryStorage:
         if self.db_manager is None:
             self._init_sqlite()
 
-        self.vector_dim = int(self.config.get("vector_dim", 768))
+        # Resolve embedding model + dimension from the process singleton.
+        # This avoids loading the model multiple times in the same process.
+        model_name = self.config.get("embedding_model", "all-MiniLM-L6-v2")
+        self.embedding_model, resolved_dim = _get_embedding_model(model_name)
+        self.vector_dim = resolved_dim
+
         self.lru_cache = LRUCache(capacity=int(self.config.get("cache_capacity", 2000)))
 
-        # FAISS / Simple Vector Index
+        # FAISS / Simple Vector Index — built with the correct dimension from the start
         self._init_vector_index()
-        self._init_embedding_model()
 
         # Hybrid search weights
         self.w_keyword = float(self.config.get("w_keyword", 0.35))
@@ -98,6 +138,11 @@ class MemoryStorage:
         self.w_importance = float(self.config.get("w_importance", 0.15))
         self.w_recency = float(self.config.get("w_recency", 0.10))
         self.w_frequency = float(self.config.get("w_frequency", 0.05))
+
+        # Observability
+        self._slow_query_ms = float(self.config.get("log_slow_query_ms", 100))
+        self._max_payload_bytes = int(self.config.get("max_payload_bytes", 65536))
+        self._max_query_length = int(self.config.get("max_query_length", 2000))
 
     def _init_sqlite(self):
         """Initialize direct SQLite connection if DatabaseManager was not injected."""
@@ -190,6 +235,8 @@ class MemoryStorage:
             (3, "ADD priority",            "ALTER TABLE memories ADD COLUMN priority INTEGER DEFAULT 5"),
             (4, "ADD source_attribution",  "ALTER TABLE memories ADD COLUMN source_attribution TEXT"),
             (5, "ADD consolidation_count", "ALTER TABLE memories ADD COLUMN consolidation_count INTEGER DEFAULT 0"),
+            # memory_type mirrors `type` for frontend compatibility
+            (6, "ADD memory_type alias",   "ALTER TABLE memories ADD COLUMN memory_type TEXT"),
         ]
         with self.conn:
             applied = {r[0] for r in self.conn.execute("SELECT version FROM schema_migrations").fetchall()}
@@ -252,30 +299,6 @@ class MemoryStorage:
             self.index = SimpleIndex(self.vector_dim)
         self.memory_map: Dict[int, str] = {}
 
-    def _init_embedding_model(self):
-        model_name = self.config.get("embedding_model", "all-MiniLM-L6-v2")
-        if _HAS_ST and SentenceTransformer is not None:
-            try:
-                self.embedding_model = SentenceTransformer(model_name)
-                # Detect actual output dimension from the model and override vector_dim.
-                # This prevents shape mismatches when the model produces 384-dim vectors
-                # but vector_dim was initialised to 768 (the old hash-fallback default).
-                probe = self.embedding_model.encode("probe")
-                actual_dim = int(probe.shape[0]) if hasattr(probe, "shape") else len(probe)
-                if actual_dim != self.vector_dim:
-                    self.logger.info(
-                        f"memory_storage.embedding_dim_updated "
-                        f"old={self.vector_dim} new={actual_dim} model={model_name}"
-                    )
-                    self.vector_dim = actual_dim
-                    # Rebuild the vector index with the correct dimension.
-                    self._init_vector_index()
-            except Exception as exc:
-                self.logger.warning(f"memory_storage.embedding_model_load_failed error={exc}")
-                self.embedding_model = None
-        else:
-            self.embedding_model = None
-
     def _generate_embedding(self, text_str: str) -> List[float]:
         if self.embedding_model is not None:
             try:
@@ -297,34 +320,73 @@ class MemoryStorage:
     # ─── Connection Context Helper ────────────────────────────────────────────
 
     def _execute_sql(self, sql: str, params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
-        if self.db_manager is not None:
-            return self.db_manager.repository.fetch_all(sql, params)
-
-        if not self.conn:
-            return []
-        with self.conn:
-            cursor = self.conn.execute(sql, params)
-            if cursor.description:
-                rows = cursor.fetchall()
-                return [dict(r) for r in rows]
-            return []
+        t0 = time.perf_counter()
+        try:
+            if self.db_manager is not None:
+                return self.db_manager.repository.fetch_all(sql, params)
+            if not self.conn:
+                return []
+            with self.conn:
+                cursor = self.conn.execute(sql, params)
+                if cursor.description:
+                    rows = cursor.fetchall()
+                    return [dict(r) for r in rows]
+                return []
+        finally:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            if elapsed_ms > self._slow_query_ms:
+                self.logger.warning(
+                    "memory_storage.slow_query elapsed_ms=%.1f sql=%.80s",
+                    elapsed_ms, sql,
+                )
 
     def _write_sql(self, sql: str, params: Sequence[Any] = ()) -> int:
-        if self.db_manager is not None:
-            return self.db_manager.repository.execute(sql, params)
+        t0 = time.perf_counter()
+        try:
+            if self.db_manager is not None:
+                return self.db_manager.repository.execute(sql, params)
+            if not self.conn:
+                return 0
+            with self.conn:
+                cursor = self.conn.execute(sql, params)
+                self.conn.commit()
+                return cursor.rowcount
+        finally:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            if elapsed_ms > self._slow_query_ms:
+                self.logger.warning(
+                    "memory_storage.slow_write elapsed_ms=%.1f sql=%.80s",
+                    elapsed_ms, sql,
+                )
 
-        if not self.conn:
-            return 0
-        with self.conn:
-            cursor = self.conn.execute(sql, params)
-            self.conn.commit()
-            return cursor.rowcount
+    # ─── Store / Create ───────────────────────────────────────────────────────
+
+    # ─── Validation ───────────────────────────────────────────────────────────
+
+    def _validate_store(self, memory: MemoryItem) -> None:
+        """Raise ValueError for malformed or oversized memory payloads."""
+        if not memory.id or not isinstance(memory.id, str):
+            raise ValueError("memory.id must be a non-empty string")
+        content_str = json.dumps(memory.content) if not isinstance(memory.content, str) else memory.content
+        if len(content_str.encode("utf-8")) > self._max_payload_bytes:
+            raise ValueError(
+                f"memory payload exceeds max_payload_bytes={self._max_payload_bytes}"
+            )
+        if not (0.0 <= memory.metadata.importance <= 1.0):
+            raise ValueError("importance must be in [0.0, 1.0]")
+        if not (0.0 <= memory.metadata.confidence <= 1.0):
+            raise ValueError("confidence must be in [0.0, 1.0]")
+
+    def _validate_query(self, query: str) -> str:
+        """Truncate and sanitize query string."""
+        return (query or "").strip()[: self._max_query_length]
 
     # ─── Store / Create ───────────────────────────────────────────────────────
 
     def store(self, memory: MemoryItem) -> bool:
         """Store a MemoryItem into SQLite, update cache, and index vector."""
         try:
+            self._validate_store(memory)
             content_str = json.dumps(memory.content) if not isinstance(memory.content, str) else memory.content
 
             # Always regenerate embedding if missing or if dimension doesn't match current model.
@@ -358,14 +420,15 @@ class MemoryStorage:
             # additive migration in _create_tables_direct / ensure_cognitive_schema.
             sql = """
             INSERT OR REPLACE INTO memories
-            (id, type, content, metadata, user_id, agent_id, conversation_id, importance, confidence,
+            (id, type, memory_type, content, metadata, user_id, agent_id, conversation_id, importance, confidence,
              access_count, last_accessed, created_at, updated_at, expires_at, is_archived, is_deleted,
              version, embedding, ttl, tags, category, priority, source_attribution, consolidation_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             params = (
                 memory.id,
                 mem_type_val,
+                mem_type_val,   # memory_type mirrors type for frontend compatibility
                 content_str,
                 json.dumps(meta_dict),
                 memory.user_id,
@@ -393,7 +456,10 @@ class MemoryStorage:
             self._write_sql(sql, params)
             self.lru_cache.put(memory.id, memory)
 
-            if memory.embedding:
+            # Only add to the vector index if this ID is not already mapped.
+            # INSERT OR REPLACE re-uses the same memory.id so we must not
+            # append a duplicate entry on every update call.
+            if memory.embedding and memory.id not in self.memory_map.values():
                 idx = self.index.ntotal
                 self.index.add(np.array([memory.embedding], dtype=np.float32))
                 self.memory_map[idx] = memory.id
@@ -427,12 +493,12 @@ class MemoryStorage:
         mem_type_val = memory.type.value if hasattr(memory.type, "value") else str(memory.type)
         sql = """
         INSERT OR REPLACE INTO memories
-        (id, type, content, metadata, user_id, agent_id, conversation_id, importance, confidence,
+        (id, type, memory_type, content, metadata, user_id, agent_id, conversation_id, importance, confidence,
          access_count, last_accessed, created_at, updated_at, expires_at, is_archived, is_deleted, version, embedding, ttl)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
-            memory.id, mem_type_val, content_str, json.dumps(meta_dict),
+            memory.id, mem_type_val, mem_type_val, content_str, json.dumps(meta_dict),
             memory.user_id, memory.agent_id, memory.conversation_id,
             memory.metadata.importance, memory.metadata.confidence,
             memory.access_count,
@@ -570,6 +636,11 @@ class MemoryStorage:
         Combines keyword token overlap, vector cosine similarity, importance,
         recency decay, and frequency weighting.
         """
+        # Validate / sanitize query
+        filter_opts.query = self._validate_query(filter_opts.query)
+        limit = max(1, min(filter_opts.limit, int(self.config.get("max_limit", 500))))
+        filter_opts.limit = limit
+
         conditions = ["is_deleted = 0"]
         params: List[Any] = []
 
@@ -763,18 +834,38 @@ class MemoryStorage:
     # ─── Update / Delete / Archive ────────────────────────────────────────────
 
     def update(self, memory_id: str, updates: Dict[str, Any], reason: str = "update") -> bool:
-        """Update a memory item and save version snapshot to history."""
+        """
+        Update a memory item using SQL UPDATE (not INSERT OR REPLACE) so that
+        ON DELETE CASCADE does not wipe memory_history / memory_relationships.
+        Access-count-only updates (reason='recalled') skip the history snapshot
+        to avoid write amplification on every recall.
+        """
         memory = self.retrieve(memory_id)
         if not memory:
             return False
 
-        # Apply updates to the in-memory object first
+        # Access-count increment: lightweight SQL UPDATE, no history snapshot.
+        if reason == "recalled" and set(updates.keys()) <= {"access_count"}:
+            new_count = int(updates.get("access_count", memory.access_count))
+            self._write_sql(
+                "UPDATE memories SET access_count = ?, last_accessed = ? WHERE id = ?",
+                (new_count, datetime.utcnow().isoformat(), memory_id),
+            )
+            # Refresh cache entry
+            memory.access_count = new_count
+            memory.last_accessed = datetime.utcnow()
+            self.lru_cache.put(memory_id, memory)
+            return True
+
+        # Full update: apply field changes then persist via SQL UPDATE.
         memory.version += 1
         memory.updated_at = datetime.utcnow()
 
         for k, v in updates.items():
             if k == "content":
                 memory.content = v
+                # Invalidate embedding so store() regenerates it
+                memory.embedding = None
             elif k == "importance":
                 memory.metadata.importance = float(v)
             elif k == "confidence":
@@ -784,27 +875,57 @@ class MemoryStorage:
             elif hasattr(memory, k):
                 setattr(memory, k, v)
 
-        # Persist the updated row first so the FK constraint is satisfied
-        stored = self.store(memory)
+        content_str = json.dumps(memory.content) if not isinstance(memory.content, str) else memory.content
+        if memory.embedding is None or len(memory.embedding) != self.vector_dim:
+            memory.embedding = self._generate_embedding(content_str)
 
-        # Save snapshot AFTER store so the FK reference is valid
-        snapshot_sql = """
-        INSERT INTO memory_history (id, memory_id, version, content_snapshot, change_reason, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """
+        tags_json = json.dumps(memory.metadata.tags or [])
+        emb_blob = np.array(memory.embedding, dtype=np.float32).tobytes() if memory.embedding else None
+
         self._write_sql(
-            snapshot_sql,
+            """
+            UPDATE memories SET
+                content = ?, metadata = ?, importance = ?, confidence = ?,
+                access_count = ?, last_accessed = ?, updated_at = ?,
+                version = ?, embedding = ?, tags = ?
+            WHERE id = ?
+            """,
+            (
+                content_str,
+                json.dumps({
+                    "source": memory.metadata.source.value if hasattr(memory.metadata.source, "value") else str(memory.metadata.source),
+                    "timestamp": memory.metadata.timestamp.isoformat() if isinstance(memory.metadata.timestamp, datetime) else str(memory.metadata.timestamp),
+                    "importance": memory.metadata.importance,
+                    "confidence": memory.metadata.confidence,
+                    "context": memory.metadata.context or {},
+                    "tags": memory.metadata.tags or [],
+                }),
+                memory.metadata.importance,
+                memory.metadata.confidence,
+                memory.access_count,
+                memory.last_accessed.isoformat() if memory.last_accessed else None,
+                memory.updated_at.isoformat(),
+                memory.version,
+                emb_blob,
+                tags_json,
+                memory_id,
+            ),
+        )
+        self.lru_cache.put(memory_id, memory)
+
+        # History snapshot — written after the row update so FK is valid
+        self._write_sql(
+            "INSERT INTO memory_history (id, memory_id, version, content_snapshot, change_reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 f"hist-{uuid.uuid4().hex[:12]}",
-                memory.id,
+                memory_id,
                 memory.version,
                 json.dumps(memory.content),
                 reason,
                 datetime.utcnow().isoformat(),
             ),
         )
-
-        return stored
+        return True
 
     def delete(self, memory_id: str, hard: bool = False) -> bool:
         """Delete a memory item (soft delete by default, hard delete optional)."""
@@ -829,15 +950,27 @@ class MemoryStorage:
     # ─── Maintenance & Cleanup ────────────────────────────────────────────────
 
     def cleanup_expired(self) -> int:
-        """Purge soft-deleted or TTL-expired memories."""
+        """
+        Purge soft-deleted or TTL-expired memories in a single batched operation
+        instead of one DELETE per row.
+        """
         now_iso = datetime.utcnow().isoformat()
+        # Collect IDs first so we can evict them from the LRU cache
         rows = self._execute_sql(
             "SELECT id FROM memories WHERE is_deleted = 1 OR (expires_at IS NOT NULL AND expires_at < ?)",
             (now_iso,),
         )
+        if not rows:
+            return 0
         expired_ids = [r["id"] for r in rows]
         for mid in expired_ids:
-            self.delete(mid, hard=True)
+            self.lru_cache.remove(mid)
+
+        # Batch-delete relationships and history, then the memories themselves
+        placeholders = ",".join("?" for _ in expired_ids)
+        self._write_sql(f"DELETE FROM memory_relationships WHERE source_id IN ({placeholders}) OR target_id IN ({placeholders})", expired_ids + expired_ids)
+        self._write_sql(f"DELETE FROM memory_history WHERE memory_id IN ({placeholders})", expired_ids)
+        self._write_sql(f"DELETE FROM memories WHERE id IN ({placeholders})", expired_ids)
         return len(expired_ids)
 
     def close(self):

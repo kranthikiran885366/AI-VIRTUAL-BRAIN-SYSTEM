@@ -259,6 +259,8 @@ class DatabaseManager:
             (3, "ADD priority column",   "ALTER TABLE memories ADD COLUMN priority INTEGER DEFAULT 5"),
             (4, "ADD source_attribution","ALTER TABLE memories ADD COLUMN source_attribution TEXT"),
             (5, "ADD consolidation_count","ALTER TABLE memories ADD COLUMN consolidation_count INTEGER DEFAULT 0"),
+            # memory_type is a frontend alias for the `type` column — kept in sync by a trigger
+            (6, "ADD memory_type alias", "ALTER TABLE memories ADD COLUMN memory_type TEXT"),
         ]
         with self.pool.get_connection() as conn:
             applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
@@ -283,6 +285,7 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_mem_active ON memories(is_deleted, is_archived, type)",
             "CREATE INDEX IF NOT EXISTS idx_mem_importance ON memories(importance DESC)",
             "CREATE INDEX IF NOT EXISTS idx_mem_category ON memories(category) WHERE category IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_mem_memory_type ON memories(memory_type) WHERE memory_type IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_rel_source ON memory_relationships(source_id)",
             "CREATE INDEX IF NOT EXISTS idx_rel_target ON memory_relationships(target_id)",
             "CREATE INDEX IF NOT EXISTS idx_hist_mem ON memory_history(memory_id, version)",
@@ -297,6 +300,71 @@ class DatabaseManager:
     def initialize(self) -> None:
         self.pool.initialize()
         self.ensure_cognitive_schema()
+        self.ensure_decision_schema()
+
+    def ensure_decision_schema(self) -> None:
+        """Create decision intelligence tables for persistence, replay, and analytics."""
+        ddl = [
+            """
+            CREATE TABLE IF NOT EXISTS decision_records (
+                decision_id   TEXT PRIMARY KEY,
+                request_id    TEXT,
+                correlation_id TEXT,
+                trace_id      TEXT,
+                version       TEXT NOT NULL DEFAULT '4.0.0',
+                content       TEXT,
+                user_id       TEXT,
+                conversation_id TEXT,
+                agent_hint    TEXT,
+                selected_agent TEXT,
+                selected_agents TEXT,
+                routing_strategy TEXT,
+                intent_type   TEXT,
+                intent_confidence REAL,
+                routing_confidence REAL,
+                combined_confidence REAL,
+                is_fallback   INTEGER DEFAULT 0,
+                fallback_used INTEGER DEFAULT 0,
+                multi_agent   INTEGER DEFAULT 0,
+                status        TEXT NOT NULL DEFAULT 'completed',
+                explanation   TEXT,
+                latency_ms    REAL,
+                error         TEXT,
+                created_at    TEXT NOT NULL,
+                completed_at  TEXT,
+                raw_json      TEXT
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS decision_feedback (
+                id            TEXT PRIMARY KEY,
+                decision_id   TEXT NOT NULL,
+                agent_name    TEXT NOT NULL,
+                success       INTEGER NOT NULL,
+                latency_ms    REAL,
+                retry_count   INTEGER DEFAULT 0,
+                quality_score REAL DEFAULT 1.0,
+                error         TEXT,
+                recorded_at   TEXT NOT NULL,
+                FOREIGN KEY(decision_id) REFERENCES decision_records(decision_id) ON DELETE CASCADE
+            )
+            """,
+        ]
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_dec_user ON decision_records(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_dec_agent ON decision_records(selected_agent, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_dec_status ON decision_records(status)",
+            "CREATE INDEX IF NOT EXISTS idx_dec_corr ON decision_records(correlation_id)",
+            "CREATE INDEX IF NOT EXISTS idx_dec_conv ON decision_records(conversation_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_fb_decision ON decision_feedback(decision_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fb_agent ON decision_feedback(agent_name, recorded_at DESC)",
+        ]
+        with self.pool.get_connection() as conn:
+            for sql in ddl:
+                conn.execute(sql)
+            for sql in indexes:
+                conn.execute(sql)
+            conn.commit()
 
     def shutdown(self) -> None:
         self.pool.close()
@@ -309,3 +377,143 @@ class DatabaseManager:
         except Exception as exc:
             return {"ok": False, "status": "unhealthy", "error": str(exc)}
 
+
+
+class DecisionRepository:
+    """
+    Persists and queries decision records for analytics, replay, and debugging.
+    Uses the existing SQLiteConnectionPool — no new dependencies.
+    """
+
+    def __init__(self, db_manager: DatabaseManager) -> None:
+        self._repo = db_manager.repository
+
+    def save(self, record_dict: Dict[str, Any]) -> bool:
+        """Upsert a decision record. Returns True on success."""
+        import json as _json
+        try:
+            routing = record_dict.get("routing") or {}
+            intents = record_dict.get("intents") or []
+            primary = record_dict.get("primary_intent") or {}
+            self._repo.execute(
+                """
+                INSERT OR REPLACE INTO decision_records (
+                    decision_id, request_id, correlation_id, trace_id, version,
+                    content, user_id, conversation_id, agent_hint,
+                    selected_agent, selected_agents, routing_strategy,
+                    intent_type, intent_confidence, routing_confidence,
+                    combined_confidence, is_fallback, fallback_used, multi_agent,
+                    status, explanation, latency_ms, error, created_at, completed_at,
+                    raw_json
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    record_dict.get("decision_id"),
+                    record_dict.get("request_id"),
+                    record_dict.get("correlation_id"),
+                    record_dict.get("trace_id"),
+                    record_dict.get("version", "4.0.0"),
+                    (record_dict.get("content") or "")[:500],
+                    record_dict.get("user_id"),
+                    record_dict.get("conversation_id"),
+                    record_dict.get("agent_hint"),
+                    routing.get("selected_agent") or record_dict.get("selected_agent"),
+                    _json.dumps(record_dict.get("selected_agents") or []),
+                    routing.get("strategy") or record_dict.get("routing_strategy"),
+                    primary.get("intent_type"),
+                    record_dict.get("intent_confidence"),
+                    record_dict.get("routing_confidence"),
+                    record_dict.get("combined_confidence"),
+                    int(bool(routing.get("is_fallback"))),
+                    int(bool(record_dict.get("fallback_used"))),
+                    int(bool(record_dict.get("multi_agent"))),
+                    record_dict.get("status", "completed"),
+                    record_dict.get("explanation"),
+                    record_dict.get("latency_ms"),
+                    record_dict.get("error"),
+                    record_dict.get("created_at"),
+                    record_dict.get("completed_at"),
+                    _json.dumps(record_dict, default=str),
+                ),
+            )
+            return True
+        except Exception as exc:
+            logger.warning("decision_repository.save_failed error=%s", exc)
+            return False
+
+    def save_feedback(self, decision_id: str, feedback_dict: Dict[str, Any]) -> bool:
+        """Persist execution feedback for a decision."""
+        import uuid as _uuid, json as _json
+        try:
+            self._repo.execute(
+                """
+                INSERT OR REPLACE INTO decision_feedback
+                (id, decision_id, agent_name, success, latency_ms,
+                 retry_count, quality_score, error, recorded_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(_uuid.uuid4()),
+                    decision_id,
+                    feedback_dict.get("agent_name", ""),
+                    int(bool(feedback_dict.get("success", True))),
+                    feedback_dict.get("latency_ms", 0.0),
+                    feedback_dict.get("retry_count", 0),
+                    feedback_dict.get("quality_score", 1.0),
+                    feedback_dict.get("error"),
+                    feedback_dict.get("timestamp", datetime.utcnow().isoformat()),
+                ),
+            )
+            return True
+        except Exception as exc:
+            logger.warning("decision_repository.save_feedback_failed error=%s", exc)
+            return False
+
+    def get_by_id(self, decision_id: str) -> Optional[Dict[str, Any]]:
+        return self._repo.fetch_one(
+            "SELECT * FROM decision_records WHERE decision_id = ?", (decision_id,)
+        )
+
+    def get_recent(self, limit: int = 50, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if user_id:
+            return self._repo.fetch_all(
+                "SELECT * FROM decision_records WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            )
+        return self._repo.fetch_all(
+            "SELECT * FROM decision_records ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+
+    def get_by_agent(self, agent_name: str, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._repo.fetch_all(
+            "SELECT * FROM decision_records WHERE selected_agent = ? ORDER BY created_at DESC LIMIT ?",
+            (agent_name, limit),
+        )
+
+    def get_agent_stats(self, agent_name: str) -> Dict[str, Any]:
+        row = self._repo.fetch_one(
+            """
+            SELECT
+                COUNT(*) as total,
+                AVG(latency_ms) as avg_latency_ms,
+                SUM(is_fallback) as fallback_count,
+                AVG(combined_confidence) as avg_confidence,
+                AVG(routing_confidence) as avg_routing_confidence
+            FROM decision_records WHERE selected_agent = ?
+            """,
+            (agent_name,),
+        )
+        return dict(row) if row else {}
+
+    def get_replay_context(self, decision_id: str) -> Optional[Dict[str, Any]]:
+        """Return the raw_json blob for decision replay."""
+        import json as _json
+        row = self._repo.fetch_one(
+            "SELECT raw_json FROM decision_records WHERE decision_id = ?", (decision_id,)
+        )
+        if not row or not row.get("raw_json"):
+            return None
+        try:
+            return _json.loads(row["raw_json"])
+        except Exception:
+            return None

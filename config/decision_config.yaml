@@ -1,0 +1,90 @@
+# Decision Intelligence Configuration — Phase 4
+# All operational thresholds and policies are externalized here.
+
+confidence:
+  # Minimum confidence to accept a routing decision without fallback
+  min_routing_confidence: 0.35
+  # Minimum intent confidence to proceed without ambiguity handling
+  min_intent_confidence: 0.30
+  # Threshold above which a decision is considered high-confidence
+  high_confidence_threshold: 0.75
+  # Calibration weight: tfidf vs embedding blend (0.0 = all tfidf, 1.0 = all embed)
+  embedding_blend_weight: 0.55
+  # Historical performance weight applied to combined score
+  history_weight: 0.15
+
+routing:
+  # Default fallback agent when no match found
+  fallback_agent: "orchestrator_agent"
+  # Maximum number of alternative agents to include in routing result
+  max_alternatives: 3
+  # Enable capability-based routing (uses AgentManager capability registry)
+  capability_routing_enabled: true
+  # Enable health-aware routing (skips unhealthy agents)
+  health_aware_routing: true
+  # Enable load-aware routing (prefers agents with lower execution counts)
+  load_aware_routing: true
+  # Maximum parallel agents for multi-agent execution
+  max_parallel_agents: 5
+  # Timeout for individual agent execution in multi-agent mode (seconds)
+  agent_execution_timeout: 30.0
+  # Routing strategies in priority order: semantic, capability, keyword
+  strategy_order:
+    - semantic
+    - capability
+    - keyword
+
+intent:
+  # Enable multi-intent detection
+  multi_intent_enabled: true
+  # Maximum number of intents to detect per request
+  max_intents: 3
+  # Minimum score for secondary intent to be included
+  secondary_intent_threshold: 0.20
+  # Intent types supported
+  supported_types:
+    - conversation
+    - task
+    - question
+    - command
+    - workflow
+    - information_request
+    - analysis_request
+    - creative_request
+    - planning_request
+
+fallback:
+  # Retry on agent unavailability
+  retry_on_unavailable: true
+  # Maximum retry attempts
+  max_retries: 2
+  # Delay between retries (seconds)
+  retry_delay: 0.5
+  # Enable safe degradation (return partial results on partial failure)
+  safe_degradation: true
+  # Fallback chain: ordered list of agents to try when primary fails
+  fallback_chain:
+    - "orchestrator_agent"
+    - "language_agent"
+
+decision:
+  # Maximum decision history entries kept in memory
+  max_history: 2000
+  # Persist decision history to disk on shutdown
+  persist_history: true
+  # History file path
+  history_path: "logs/decision_history.json"
+  # Decision audit log path
+  audit_log_path: "logs/decision_audit.jsonl"
+  # Enable decision replay support
+  replay_enabled: true
+  # Decision versioning
+  version: "4.0.0"
+
+performance:
+  # Cache capability lookups (TTL in seconds)
+  capability_cache_ttl: 60
+  # Maximum concurrent routing evaluations
+  max_concurrent_routing: 50
+  # Routing timeout (seconds)
+  routing_timeout: 5.0

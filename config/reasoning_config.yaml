@@ -1,0 +1,50 @@
+# Reasoning Engine Configuration — Phase 5
+# All operational parameters are externalized here.
+
+reasoning:
+  # Maximum number of steps in a single reasoning chain
+  max_chain_length: 8
+  # Maximum recursive reasoning depth
+  max_reasoning_depth: 4
+  # Timeout for a single reasoning request (seconds)
+  reasoning_timeout_seconds: 30.0
+  # Maximum reasoning history entries kept in memory
+  max_history: 2000
+  # Enable reasoning replay support
+  replay_enabled: true
+  # Reasoning engine version
+  version: "5.1.0"
+
+confidence:
+  # Minimum confidence to accept a reasoning conclusion
+  min_reasoning_confidence: 0.35
+  # Threshold above which a conclusion is considered high-confidence
+  high_confidence_threshold: 0.75
+  # Historical performance weight applied to confidence calibration
+  history_weight: 0.15
+
+evidence:
+  # Maximum evidence items evaluated per request
+  max_evidence_items: 50
+  # Minimum evidence confidence to include in supporting set
+  min_supporting_confidence: 0.50
+  # Enable evidence relationship tracking
+  relationship_tracking: true
+
+contradiction:
+  # Enable contradiction detection
+  enabled: true
+  # Severity levels: low, medium, high
+  default_severity: "medium"
+
+performance:
+  # Maximum parallel evidence evaluations
+  parallel_evaluation_limit: 4
+  # Audit trail maximum entries
+  audit_trail_limit: 5000
+
+logging:
+  # Log level for reasoning operations
+  level: "INFO"
+  # Include full reasoning chain in logs
+  log_chain: false

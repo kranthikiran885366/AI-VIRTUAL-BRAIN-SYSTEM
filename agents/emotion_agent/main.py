@@ -236,19 +236,49 @@ class EmotionAgent(BaseAgent):
         text = input_data.get("text", input_data.get("content", ""))
 
         if action in ("analyze", "detect", "process"):
-            return self._analyze_text(text)
+            result = self._analyze_text(text)
+            return {"status": "analyzed", **result}
 
         if action == "store" and self.processor and self.store:
             processed = await self.processor.process_emotion(input_data)
             emotion_id = await self.store.store_emotion(processed)
-            return {"emotion_id": emotion_id, "emotion": processed}
+            return {"status": "stored", "emotion_id": emotion_id, "emotion": processed}
 
         if action == "recall" and self.store:
             query = {k: v for k, v in input_data.items() if v is not None}
-            return {"emotions": await self.store.search_emotions(query)}
+            emotions = await self.store.search_emotions(query)
+            return {"status": "ok", "emotions": emotions, "count": len(emotions)}
+
+        if action == "get_stats":
+            stats = {}
+            if self.processor:
+                stats["processor"] = await self.processor.get_stats()
+            if self.store:
+                stats["store"] = await self.store.get_stats()
+            if self.analyzer:
+                stats["analyzer"] = await self.analyzer.get_stats()
+            return {"status": "ok", "stats": stats}
+
+        if action == "get_history" and self.processor:
+            history = await self.processor.get_emotion_history()
+            return {"status": "ok", "history": history, "count": len(history)}
+
+        if action == "clear":
+            if self.processor:
+                await self.processor.clear_emotions()
+            if self.store:
+                await self.store.clear_emotions()
+            if self.analyzer:
+                await self.analyzer.clear_analysis()
+            return {"status": "cleared"}
+
+        if action == "get_current" and self.processor:
+            current = await self.processor.get_current_emotions()
+            return {"status": "ok", "emotions": current}
 
         # Default: analyze whatever text is present
-        return self._analyze_text(text)
+        result = self._analyze_text(text)
+        return {"status": "analyzed", **result}
 
 
 # ─── Standalone FastAPI app ───────────────────────────────────────────────────

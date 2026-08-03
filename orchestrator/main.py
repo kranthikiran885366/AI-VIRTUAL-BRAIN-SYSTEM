@@ -29,6 +29,7 @@ from orchestrator.database import DatabaseConfig, DatabaseManager
 from orchestrator.observability import runtime_observability
 from orchestrator.task_scheduler import TaskScheduler
 from orchestrator.execution_pipeline import execute_via_pipeline
+from orchestrator.decision_engine import DecisionEngine, _PHASE4_AVAILABLE
 from orchestrator.request_context import (
     build_request_context,
     clear_request_context,
@@ -144,6 +145,7 @@ _agent_manager: Optional[AgentManager] = None
 _task_scheduler: Optional[TaskScheduler] = None
 _communication_controller: Optional[CommunicationController] = None
 _database_manager: Optional[DatabaseManager] = None
+_decision_engine: Optional[DecisionEngine] = None
 _startup_time = datetime.utcnow()
 
 # In-memory agent state (used when no DB)
@@ -280,48 +282,50 @@ class MemoryRecallRequest(BaseModel):
     limit: int = 10
 
 # ─── Agent Routing Logic ──────────────────────────────────────────────────────
+# Legacy keyword routing kept as a last-resort fallback only.
+# Primary routing is handled by DecisionEngine (Phase 4 pipeline).
 
-AGENT_KEYWORDS: Dict[str, List[str]] = {
-    "memory_agent": ["remember", "recall", "memory", "forget", "store", "save", "history"],
-    "emotion_agent": ["feel", "emotion", "sad", "happy", "angry", "anxious", "stress", "mood"],
-    "creativity_agent": ["create", "idea", "brainstorm", "creative", "imagine", "invent", "design", "story"],
-    "task_agent": ["task", "todo", "schedule", "plan", "deadline", "reminder", "organize"],
-    "reasoning_agent": ["analyze", "logic", "reason", "why", "argument", "proof", "deduce"],
-    "learning_agent": ["learn", "study", "understand", "teach", "tutorial", "knowledge"],
-    "planning_agent": ["plan", "goal", "strategy", "roadmap", "milestone", "timeline"],
-    "social_agent": ["social", "relationship", "friend", "communicate", "interact", "people"],
-    "language_agent": ["write", "code", "program", "translate", "grammar", "text", "essay"],
-    "motivation_agent": ["motivate", "inspire", "encourage", "stuck", "give up", "tired"],
-    "ethics_agent": ["ethics", "moral", "right", "wrong", "fair", "justice", "dilemma"],
-    "decision_agent": ["decide", "choice", "option", "should i", "which", "best", "compare"],
-    "perception_agent": ["see", "hear", "sense", "detect", "recognize", "identify", "perceive"],
-}
-
-def route_to_agent(content: str) -> Dict[str, Any]:
+def _keyword_route_fallback(content: str) -> Dict[str, Any]:
+    """Keyword-only fallback used when DecisionEngine is unavailable."""
+    _KEYWORDS: Dict[str, List[str]] = {
+        "memory_agent": ["remember", "recall", "memory", "forget", "store", "save", "history"],
+        "emotion_agent": ["feel", "emotion", "sad", "happy", "angry", "anxious", "stress", "mood"],
+        "creativity_agent": ["create", "idea", "brainstorm", "creative", "imagine", "invent", "design", "story"],
+        "task_agent": ["task", "todo", "schedule", "plan", "deadline", "reminder", "organize"],
+        "reasoning_agent": ["analyze", "logic", "reason", "why", "argument", "proof", "deduce"],
+        "learning_agent": ["learn", "study", "understand", "teach", "tutorial", "knowledge"],
+        "planning_agent": ["plan", "goal", "strategy", "roadmap", "milestone", "timeline"],
+        "social_agent": ["social", "relationship", "friend", "communicate", "interact", "people"],
+        "language_agent": ["write", "code", "program", "translate", "grammar", "text", "essay"],
+        "motivation_agent": ["motivate", "inspire", "encourage", "stuck", "give up", "tired"],
+        "ethics_agent": ["ethics", "moral", "right", "wrong", "fair", "justice", "dilemma"],
+        "decision_agent": ["decide", "choice", "option", "should i", "which", "best", "compare"],
+        "perception_agent": ["see", "hear", "sense", "detect", "recognize", "identify", "perceive"],
+    }
     lower = content.lower()
-    scores: Dict[str, int] = {}
-    for agent, keywords in AGENT_KEYWORDS.items():
-        score = sum(1 for kw in keywords if kw in lower)
-        if score > 0:
-            scores[agent] = score
-
+    scores: Dict[str, int] = {
+        agent: sum(1 for kw in kws if kw in lower)
+        for agent, kws in _KEYWORDS.items()
+    }
+    scores = {k: v for k, v in scores.items() if v > 0}
     if not scores:
         return {
             "selectedAgent": "orchestrator_agent",
-            "confidence": 0.6,
-            "reasoning": "No specific agent matched — using orchestrator",
-            "alternativeAgents": ["reasoning_agent", "language_agent"],
+            "confidence": 0.5,
+            "reasoning": "keyword fallback: no match",
+            "alternativeAgents": [],
+            "routing_strategy": "keyword",
+            "is_fallback": True,
         }
-
     best = max(scores, key=lambda k: scores[k])
-    confidence = min(0.95, 0.5 + scores[best] * 0.1)
     alts = sorted([a for a in scores if a != best], key=lambda k: scores[k], reverse=True)[:2]
-
     return {
         "selectedAgent": best,
-        "confidence": confidence,
-        "reasoning": f"Matched {scores[best]} keyword(s) for {best}",
+        "confidence": min(0.60, 0.35 + scores[best] * 0.08),
+        "reasoning": f"keyword fallback: {scores[best]} match(es) for {best}",
         "alternativeAgents": alts,
+        "routing_strategy": "keyword",
+        "is_fallback": True,
     }
 
 # ─── Agent Execution Logic ────────────────────────────────────────────────────
@@ -451,6 +455,22 @@ async def startup():
             lifecycle.agent_health[agent_id].status = "healthy"
 
         logger.info(f"✓ {len(_agent_manager.agents)} agents registered")
+
+        # ── Phase 4: Decision Engine ──────────────────────────────────────
+        global _decision_engine
+        _decision_engine = DecisionEngine.from_config_file("config/decision_config.yaml")
+        await _decision_engine.initialize()
+        await _decision_engine.start()
+        # Sync agent capability registry into the decision engine
+        _snapshot = _agent_manager.get_capability_snapshot()
+        _decision_engine.update_agent_registry(
+            available_agents=_snapshot["available_agents"],
+            agent_capabilities=_snapshot["agent_capabilities"],
+            agent_health=_snapshot["agent_health"],
+            agent_load=_snapshot["agent_load"],
+        )
+        logger.info(f"✓ Decision engine started (phase4={_PHASE4_AVAILABLE})")
+
         logger.info(f"✓ API server ready on http://0.0.0.0:{settings.PORT}")
         logger.info("=" * 60)
 
@@ -476,6 +496,8 @@ async def shutdown():
     try:
         broker = get_message_broker()
         lifecycle = get_lifecycle_manager()
+        if _decision_engine:
+            await asyncio.wait_for(_decision_engine.stop(), timeout=float(settings.SHUTDOWN_TIMEOUT))
         if _agent_manager:
             await asyncio.wait_for(_agent_manager.stop(), timeout=float(settings.SHUTDOWN_TIMEOUT))
         if _task_scheduler:
@@ -716,10 +738,91 @@ async def get_agent_queue(agent_id: str, limit: int = 50):
 
 # ─── Route Endpoint ───────────────────────────────────────────────────────────
 
+class RouteRequest(BaseModel):
+    content: str
+    agent_hint: Optional[str] = None
+    user_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    priority: str = "normal"
+
+
 @app.post("/route")
-async def route_request(body: Dict[str, Any]):
-    content = body.get("content", "")
-    return route_to_agent(content)
+async def route_request(body: RouteRequest):
+    """Phase 4 production routing — intent analysis + capability-based agent selection."""
+    _ctx = get_request_context()
+    context = {
+        "agent_hint": body.agent_hint,
+        "user_id": body.user_id,
+        "conversation_id": body.conversation_id,
+        "priority": body.priority,
+        "request_id": _ctx.request_id if _ctx else None,
+        "correlation_id": _ctx.correlation_id if _ctx else None,
+        "trace_id": _ctx.trace_id if _ctx else None,
+    }
+
+    if _decision_engine is not None:
+        # Sync registry on every route call so health/load stay current
+        if _agent_manager is not None:
+            snapshot = _agent_manager.get_capability_snapshot()
+            _decision_engine.update_agent_registry(
+                available_agents=snapshot["available_agents"],
+                agent_capabilities=snapshot["agent_capabilities"],
+                agent_health=snapshot["agent_health"],
+                agent_load=snapshot["agent_load"],
+            )
+        result = await _decision_engine.route_request(body.content, context)
+        # Normalise to camelCase keys expected by frontend
+        return {
+            "selectedAgent": result.get("selected_agent"),
+            "confidence": result.get("confidence"),
+            "reasoning": result.get("reasoning"),
+            "alternativeAgents": result.get("alternative_agents", []),
+            "routingStrategy": result.get("routing_strategy"),
+            "isFallback": result.get("is_fallback", False),
+            "intent": result.get("intent"),
+            "intentConfidence": result.get("intent_confidence"),
+            "routingConfidence": result.get("routing_confidence"),
+            "combinedConfidence": result.get("combined_confidence"),
+            "explanation": result.get("explanation"),
+            "decisionId": result.get("decision_id"),
+            "correlationId": result.get("correlation_id"),
+            "traceId": result.get("trace_id"),
+            "latencyMs": result.get("latency_ms"),
+            "timestamp": result.get("timestamp"),
+            "selectedAgents": result.get("selected_agents", [result.get("selected_agent")]),
+            "multiAgent": result.get("multi_agent", False),
+        }
+
+    # DecisionEngine not yet initialised — keyword fallback
+    return _keyword_route_fallback(body.content)
+
+
+@app.post("/route/feedback")
+async def route_feedback(body: Dict[str, Any]):
+    """
+    Record execution outcome for a previous routing decision.
+    Feeds back into the confidence engine for future routing calibration.
+    """
+    agent_name = body.get("agent_name", "")
+    success = bool(body.get("success", True))
+    if not agent_name:
+        raise HTTPException(status_code=422, detail="agent_name is required")
+    if _decision_engine is not None:
+        _decision_engine.record_agent_outcome(agent_name, success)
+    return {
+        "status": "recorded",
+        "agent_name": agent_name,
+        "success": success,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/route/status")
+async def route_status():
+    """Return current Decision Engine status and metrics."""
+    if _decision_engine is None:
+        return {"status": "not_initialized"}
+    return await _decision_engine.get_status()
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 

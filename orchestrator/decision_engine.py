@@ -2,8 +2,17 @@ import asyncio
 import json
 import logging
 import os
-from typing import Dict, Any, List, Optional, Callable, Awaitable
+import time
+from collections import deque
+from pathlib import Path
+from typing import Any, Callable, Deque, Dict, List, Optional, TYPE_CHECKING
 from datetime import datetime
+
+try:
+    import yaml
+    _YAML_AVAILABLE = True
+except ImportError:
+    _YAML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -15,50 +24,101 @@ except ImportError:
     get_intent_router = None  # type: ignore
     IntentRouteResult = None  # type: ignore
 
+try:
+    from orchestrator.decision_context import (
+        DecisionContext, DecisionRecord, DecisionStatus,
+        ExecutionFeedback, RoutingDecision, RoutingStrategy,
+    )
+    from orchestrator.confidence_engine import ConfidenceEngine
+    from orchestrator.intent_pipeline import IntentPipeline
+    from orchestrator.routing_engine import RoutingEngine
+    _PHASE4_AVAILABLE = True
+except ImportError:
+    _PHASE4_AVAILABLE = False
+    DecisionContext = None  # type: ignore
+    DecisionRecord = None  # type: ignore
+    DecisionStatus = None  # type: ignore
+    ExecutionFeedback = None  # type: ignore
+    RoutingDecision = None  # type: ignore
+    RoutingStrategy = None  # type: ignore
+    ConfidenceEngine = None  # type: ignore
+    IntentPipeline = None  # type: ignore
+    RoutingEngine = None  # type: ignore
+
+
 class DecisionEngine:
-    """Makes decisions about task allocation and system behavior."""
-    
+    """Production Decision Intelligence Engine — Phase 4."""
+
     def __init__(self, config: Dict[str, Any]):
-        """Initialize the decision engine with configuration."""
         self.config = config
         self.is_running = False
-        
-        # Initialize decision models
+
+        # Legacy models (kept for backward compat)
         self.task_classifier = None
         self.priority_model = None
         self.resource_allocator = None
-        
-        # Initialize decision history
-        self.decision_history = []
+
+        # Semantic router (Phase 3 component — preserved)
         self._intent_router = get_intent_router() if _SEMANTIC_ROUTING else None
         self._agent_performance: Dict[str, float] = {}
-        
-        # Initialize metrics
+
+        # Phase 4 components
+        _decision_cfg = config.get("decision", {})
+        _conf_cfg = config.get("confidence", {})
+        _routing_cfg = config.get("routing", {})
+        _intent_cfg = config.get("intent", {})
+
+        if _PHASE4_AVAILABLE:
+            self._confidence_engine = ConfidenceEngine(_conf_cfg)
+            self._intent_pipeline = IntentPipeline(
+                confidence_engine=self._confidence_engine,
+                config=_intent_cfg,
+            )
+            self._routing_engine = RoutingEngine(
+                confidence_engine=self._confidence_engine,
+                config=_routing_cfg,
+            )
+        else:
+            self._confidence_engine = None
+            self._intent_pipeline = None
+            self._routing_engine = None
+
+        # Decision history — bounded ring buffer
+        _max_history = int(_decision_cfg.get("max_history", 2000))
+        self.decision_history: Deque[Dict[str, Any]] = deque(maxlen=_max_history)
+        self._audit_log_path: str = _decision_cfg.get("audit_log_path", "logs/decision_audit.jsonl")
+        self._history_path: str = _decision_cfg.get("history_path", "logs/decision_history.json")
+        self._persist_history: bool = bool(_decision_cfg.get("persist_history", True))
+
+        # Agent capability registry snapshot (populated by AgentManager)
+        self._agent_capabilities: Dict[str, List[str]] = {}
+        self._agent_health: Dict[str, str] = {}
+        self._agent_load: Dict[str, int] = {}
+        self._available_agents: List[str] = []
+
+        self._repository: Optional[Any] = None  # DecisionRepository (optional)
+
         self.metrics = {
             "total_decisions": 0,
             "successful_decisions": 0,
             "failed_decisions": 0,
-            "average_decision_time": 0.0
+            "fallback_decisions": 0,
+            "average_decision_time": 0.0,
+            "average_confidence": 0.0,
         }
     
     async def start(self):
         """Start the decision engine."""
         logger.info("Starting decision engine...")
         self.is_running = True
-        
-        # Load models
         await self._load_models()
-        
         logger.info("Decision engine started successfully")
-    
+
     async def stop(self):
         """Stop the decision engine."""
         logger.info("Stopping decision engine...")
         self.is_running = False
-        
-        # Save decision history
         await self._save_decision_history()
-        
         logger.info("Decision engine stopped successfully")
     
     async def _load_models(self):
@@ -176,10 +236,40 @@ class DecisionEngine:
             return "language_agent"
         return "orchestrator_agent"
 
-    async def route_request(self, content: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Public semantic routing API with confidence and fallback metadata."""
-        hint = (context or {}).get("agent_name") or (context or {}).get("agent_hint")
+    async def route_request(
+        self,
+        content: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Production routing API — Phase 4.
+        Runs full intent analysis + capability-based routing pipeline.
+        Falls back to semantic router, then keyword routing.
+        Returns structured decision with audit metadata.
+        """
+        start = time.perf_counter()
+        ctx_data = context or {}
+        hint = ctx_data.get("agent_name") or ctx_data.get("agent_hint")
+        request_id = ctx_data.get("request_id")
+        correlation_id = ctx_data.get("correlation_id")
+        trace_id = ctx_data.get("trace_id")
 
+        # ── Phase 4 full pipeline ──────────────────────────────────────────
+        if _PHASE4_AVAILABLE and self._intent_pipeline and self._routing_engine:
+            try:
+                return await self._route_via_pipeline(
+                    content=content,
+                    hint=hint,
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
+                    ctx_data=ctx_data,
+                    start=start,
+                )
+            except Exception as exc:
+                logger.warning(f"decision_engine.pipeline_failed error={exc}")
+
+        # ── Legacy semantic router (Phase 3 fallback) ──────────────────────
         if self._intent_router is not None:
             try:
                 route = self._intent_router.route(
@@ -194,37 +284,225 @@ class DecisionEngine:
                     "reasoning": getattr(route, "reasoning", ""),
                     "alternative_agents": getattr(route, "alternative_agents", []),
                     "scores": getattr(route, "scores", {}),
+                    "routing_strategy": "semantic",
                     "timestamp": datetime.utcnow().isoformat(),
+                    "latency_ms": round((time.perf_counter() - start) * 1000, 2),
                 }
-                self.decision_history.append(decision)
-                self.metrics["total_decisions"] += 1
-                self.metrics["successful_decisions"] += 1
+                self._record_decision(decision)
                 return decision
             except Exception as exc:
                 logger.warning(f"decision_engine.semantic_route_failed error={exc}")
 
-        # Keyword fallback
+        # ── Keyword fallback ───────────────────────────────────────────────
         features = {"action": content, "agent_hint": hint or ""}
         agent = await self._classify_task(features)
         decision = {
             "selected_agent": agent,
-            "confidence": 0.6,
-            "uncertainty": 0.4,
+            "confidence": 0.50,
+            "uncertainty": 0.50,
             "reasoning": "keyword fallback routing",
             "alternative_agents": [],
             "scores": {},
+            "routing_strategy": "keyword",
+            "is_fallback": True,
             "timestamp": datetime.utcnow().isoformat(),
+            "latency_ms": round((time.perf_counter() - start) * 1000, 2),
         }
-        self.decision_history.append(decision)
-        self.metrics["total_decisions"] += 1
-        self.metrics["successful_decisions"] += 1
+        self._record_decision(decision)
         return decision
 
+    async def _route_via_pipeline(
+        self,
+        content: str,
+        hint: Optional[str],
+        request_id: Optional[str],
+        correlation_id: Optional[str],
+        trace_id: Optional[str],
+        ctx_data: Dict[str, Any],
+        start: float,
+    ) -> Dict[str, Any]:
+        """Full Phase 4 decision pipeline: intent → routing → confidence → audit."""
+        # Build decision context
+        dec_ctx = DecisionContext(
+            content=content,
+            agent_hint=hint,
+            user_id=ctx_data.get("user_id"),
+            conversation_id=ctx_data.get("conversation_id"),
+            priority=ctx_data.get("priority", "normal"),
+            timeout=float(ctx_data.get("timeout", 60.0) or 60.0),
+            available_agents=list(self._available_agents),
+            agent_health=dict(self._agent_health),
+            agent_load=dict(self._agent_load),
+            agent_capabilities=dict(self._agent_capabilities),
+            config=dict(self.config),
+        )
+        if request_id:
+            dec_ctx.request_id = request_id
+        if correlation_id:
+            dec_ctx.correlation_id = correlation_id
+        if trace_id:
+            dec_ctx.trace_id = trace_id
+
+        # Populate record identity
+        dec_ctx.record.request_id = dec_ctx.request_id
+        dec_ctx.record.correlation_id = dec_ctx.correlation_id
+        dec_ctx.record.trace_id = dec_ctx.trace_id
+        dec_ctx.record.content = content
+        dec_ctx.record.agent_hint = hint
+        dec_ctx.record.user_id = dec_ctx.user_id
+        dec_ctx.record.conversation_id = dec_ctx.conversation_id
+        dec_ctx.record.status = DecisionStatus.ANALYZING
+
+        # Step 1: Intent analysis
+        normalized = self._intent_pipeline.normalize(content)
+        primary_intent, all_intents = self._intent_pipeline.analyze(normalized)
+        dec_ctx.record.primary_intent = primary_intent
+        dec_ctx.record.intents = all_intents
+        dec_ctx.record.intent_confidence = primary_intent.confidence if primary_intent else 0.0
+        dec_ctx.record.status = DecisionStatus.ROUTING
+
+        # Step 2: Routing
+        routing = self._routing_engine.route(dec_ctx, self._intent_router)
+        dec_ctx.record.routing = routing
+        dec_ctx.record.selected_agents = [routing.selected_agent]
+        dec_ctx.record.routing_confidence = routing.confidence
+        dec_ctx.record.fallback_used = routing.is_fallback
+
+        multi_agents = []
+        if len(all_intents) > 1 and self._routing_engine:
+            multi_agents = self._routing_engine.route_multi_agent(dec_ctx, self._intent_router)
+            if multi_agents:
+                dec_ctx.record.multi_agent = True
+                dec_ctx.record.selected_agents = [item.selected_agent for item in multi_agents]
+
+        # Step 3: Combined confidence
+        combined = self._confidence_engine.combined_confidence(
+            dec_ctx.record.intent_confidence,
+            dec_ctx.record.routing_confidence,
+        )
+        dec_ctx.record.combined_confidence = combined
+
+        # Step 4: Rich explanation
+        rich_explanation = self._routing_engine.explain_routing(routing, dec_ctx)
+        explanation = rich_explanation + " || " + self._confidence_engine.explain(
+            dec_ctx.record.intent_confidence,
+            dec_ctx.record.routing_confidence,
+            combined,
+        )
+        dec_ctx.record.explanation = explanation
+
+        # Finalize
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+        dec_ctx.record.latency_ms = latency_ms
+        dec_ctx.record.status = DecisionStatus.COMPLETED
+        dec_ctx.record.completed_at = datetime.utcnow().isoformat()
+
+        result = {
+            "decision_id": dec_ctx.record.decision_id,
+            "selected_agent": routing.selected_agent,
+            "selected_agents": list(dec_ctx.record.selected_agents) or [routing.selected_agent],
+            "multi_agent": bool(dec_ctx.record.multi_agent),
+            "confidence": routing.confidence,
+            "uncertainty": routing.uncertainty,
+            "reasoning": routing.reasoning,
+            "alternative_agents": routing.alternative_agents,
+            "scores": routing.scores,
+            "routing_strategy": routing.strategy.value,
+            "is_fallback": routing.is_fallback,
+            "intent": primary_intent.to_dict() if primary_intent else None,
+            "all_intents": [i.to_dict() for i in all_intents],
+            "intent_confidence": dec_ctx.record.intent_confidence,
+            "routing_confidence": dec_ctx.record.routing_confidence,
+            "combined_confidence": combined,
+            "explanation": explanation,
+            "request_id": dec_ctx.request_id,
+            "correlation_id": dec_ctx.correlation_id,
+            "trace_id": dec_ctx.trace_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "latency_ms": latency_ms,
+        }
+
+        self._record_decision(result)
+        self._append_audit(dec_ctx.record)
+
+        if routing.is_fallback:
+            self.metrics["fallback_decisions"] += 1
+
+        return result
+
+    async def replay_decision(self, decision_id: str) -> Dict[str, Any]:
+        """
+        Replay a previous decision using its stored context.
+        Requires DecisionRepository wired via set_repository().
+        """
+        if self._repository is None:
+            return {"error": "repository_not_configured", "decision_id": decision_id}
+        ctx_data = self._repository.get_replay_context(decision_id)
+        if not ctx_data:
+            return {"error": "decision_not_found", "decision_id": decision_id}
+        content = ctx_data.get("content", "")
+        replay_ctx = {
+            "user_id": ctx_data.get("user_id"),
+            "conversation_id": ctx_data.get("conversation_id"),
+            "agent_hint": ctx_data.get("agent_hint"),
+            "priority": ctx_data.get("priority", "normal"),
+            "replay": True,
+            "original_decision_id": decision_id,
+        }
+        result = await self.route_request(content, replay_ctx)
+        result["replayed_from"] = decision_id
+        result["is_replay"] = True
+        return result
+
+    def set_repository(self, repository: Any) -> None:
+        """Wire a DecisionRepository for persistence and replay."""
+        self._repository = repository
+
     def record_agent_outcome(self, agent_name: str, success: bool) -> None:
-        """Weight future routing by historical agent outcomes."""
+        """Record execution outcome — updates both legacy weights and Phase 4 confidence engine."""
         current = self._agent_performance.get(agent_name, 1.0)
         delta = 0.05 if success else -0.08
         self._agent_performance[agent_name] = max(0.2, min(1.5, current + delta))
+        if self._confidence_engine:
+            self._confidence_engine.record_outcome(agent_name, success)
+
+    def update_agent_registry(
+        self,
+        available_agents: List[str],
+        agent_capabilities: Dict[str, List[str]],
+        agent_health: Optional[Dict[str, str]] = None,
+        agent_load: Optional[Dict[str, int]] = None,
+    ) -> None:
+        """Sync agent registry snapshot used by routing engine."""
+        self._available_agents = list(available_agents)
+        self._agent_capabilities = dict(agent_capabilities)
+        self._agent_health = dict(agent_health or {})
+        self._agent_load = dict(agent_load or {})
+        if self._routing_engine:
+            for agent, caps in agent_capabilities.items():
+                self._routing_engine.update_capability_cache(agent, caps)
+
+    def _record_decision(self, decision: Dict[str, Any]) -> None:
+        """Append to bounded decision history and update metrics."""
+        self.decision_history.append(decision)
+        self.metrics["total_decisions"] += 1
+        self.metrics["successful_decisions"] += 1
+        # Rolling average confidence
+        conf = decision.get("confidence", 0.0)
+        n = self.metrics["total_decisions"]
+        prev_avg = self.metrics["average_confidence"]
+        self.metrics["average_confidence"] = round(
+            (prev_avg * (n - 1) + conf) / n, 4
+        )
+
+    def _append_audit(self, record: Any) -> None:
+        """Append decision record to JSONL audit log (non-blocking best-effort)."""
+        try:
+            os.makedirs("logs", exist_ok=True)
+            with open(self._audit_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record.to_dict(), default=str) + "\n")
+        except Exception as exc:
+            logger.debug(f"decision_engine.audit_write_failed error={exc}")
 
     async def _determine_priority(self, features: Dict[str, Any]) -> int:
         """Determine task priority from task metadata."""
@@ -300,14 +578,16 @@ class DecisionEngine:
     
     async def _save_decision_history(self):
         """Save decision history to file with safe serialization."""
+        if not self._persist_history:
+            return
         try:
             os.makedirs("logs", exist_ok=True)
             def _default(obj):
                 if isinstance(obj, datetime):
                     return obj.isoformat()
                 return str(obj)
-            with open("logs/decision_history.json", "w") as f:
-                json.dump(self.decision_history[-1000:], f, indent=2, default=_default)
+            with open(self._history_path, "w") as f:
+                json.dump(list(self.decision_history), f, indent=2, default=_default)
         except Exception as e:
             logger.error(f"Failed to save decision history: {e}")
     
@@ -315,15 +595,44 @@ class DecisionEngine:
         """Get the current status of the decision engine."""
         return {
             "status": "running" if self.is_running else "stopped",
+            "phase4_enabled": _PHASE4_AVAILABLE,
             "models": {
                 "task_classifier": "loaded" if self.task_classifier else "not_loaded",
                 "priority_model": "loaded" if self.priority_model else "not_loaded",
-                "resource_allocator": "initialized" if self.resource_allocator else "not_initialized"
+                "resource_allocator": "initialized" if self.resource_allocator else "not_initialized",
+                "semantic_router": "loaded" if self._intent_router else "not_loaded",
+                "intent_pipeline": "loaded" if self._intent_pipeline else "not_loaded",
+                "routing_engine": "loaded" if self._routing_engine else "not_loaded",
+                "confidence_engine": "loaded" if self._confidence_engine else "not_loaded",
             },
             "metrics": self.metrics,
-            "decision_history_size": len(self.decision_history)
+            "decision_history_size": len(self.decision_history),
+            "available_agents": len(self._available_agents),
+            "agent_performance": dict(self._agent_performance),
         }
     
+    @classmethod
+    def from_config_file(
+        cls,
+        config_path: str = "config/decision_config.yaml",
+    ) -> "DecisionEngine":
+        """
+        Factory: load decision_config.yaml and return a configured DecisionEngine.
+        Falls back to empty config if file is missing or yaml is unavailable.
+        """
+        cfg: Dict[str, Any] = {}
+        path = Path(config_path)
+        if _YAML_AVAILABLE and path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                logger.info(f"decision_engine.config_loaded path={config_path}")
+            except Exception as exc:
+                logger.warning(f"decision_engine.config_load_failed path={config_path} error={exc}")
+        else:
+            logger.info(f"decision_engine.config_not_found path={config_path} using_defaults=true")
+        return cls(cfg)
+
     async def initialize(self):
         """Initialize the decision engine."""
         logger.info("Initializing decision engine...")

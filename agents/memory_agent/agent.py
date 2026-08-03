@@ -14,6 +14,8 @@ try:
 except ImportError:
     from ..base_agent import BaseAgent
 
+from .memory_config_loader import load_memory_config
+from .memory_automation import MemoryAutomation
 from .memory_processor import MemoryProcessor
 from .memory_storage import MemoryStorage
 from .memory_types import (
@@ -46,14 +48,20 @@ class MemoryAgent(BaseAgent):
     """
 
     def __init__(self, agent_id: str = "memory_agent", config: Optional[Dict[str, Any]] = None):
-        super().__init__(agent_id, "memory", config=config or {})
+        # Merge YAML config with any caller-supplied overrides
+        merged_config = load_memory_config(config or {})
+        super().__init__(agent_id, "memory", config=merged_config)
         self.storage = MemoryStorage(self.config)
         self.processor = MemoryProcessor(self.config, self.storage)
+        self.automation = MemoryAutomation(storage=self.storage)
+        self.automation._rules_path = self.config.get("automation_rules_path", "data/memory_automation_rules.json")
+        self.automation.max_history = int(self.config.get("automation_max_history", 1000))
         self.consolidation_threshold = float(self.config.get("consolidation_threshold", 0.65))
 
     async def initialize(self):
         await super().initialize()
         await self.processor.initialize()
+        await self.automation.initialize()
         self.state.update({
             "status": "active",
             "last_active": datetime.utcnow().isoformat(),
@@ -64,6 +72,7 @@ class MemoryAgent(BaseAgent):
         logger.info(f"MemoryAgent {self.agent_id} initialized with cognitive architecture")
 
     async def shutdown(self):
+        await self.automation.shutdown()
         await self.processor.shutdown()
         self.storage.close()
         await super().shutdown()
@@ -105,6 +114,17 @@ class MemoryAgent(BaseAgent):
         memory_id = res.get("memory_id")
         item = self.storage.retrieve(memory_id) if memory_id else None
 
+        # Enqueue for automation rule processing (non-blocking)
+        if item is not None:
+            await self.automation.enqueue({
+                "id": item.id,
+                "type": item.type.value if hasattr(item.type, "value") else str(item.type),
+                "content": item.content,
+                "importance": item.metadata.importance,
+                "tags": item.metadata.tags or [],
+                "user_id": item.user_id,
+            })
+
         await self._update_state()
         return {
             "status": res.get("status", "stored"),
@@ -143,10 +163,8 @@ class MemoryAgent(BaseAgent):
 
         for r in scored_results:
             mem = r.memory
-            # Increment access stats
-            mem.access_count += 1
-            mem.last_accessed = datetime.utcnow()
-            self.storage.update(mem.id, {"access_count": mem.access_count}, reason="recalled")
+            # Lightweight access-count increment — no history snapshot, no INSERT OR REPLACE
+            self.storage.update(mem.id, {"access_count": mem.access_count + 1}, reason="recalled")
 
             formatted.append({
                 "id": mem.id,

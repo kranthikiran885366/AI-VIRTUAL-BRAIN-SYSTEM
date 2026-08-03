@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime, timedelta
 import uuid
@@ -76,16 +77,22 @@ class EmotionAutomation:
     async def _load_rules(self):
         """Load automation rules from storage."""
         try:
-            with open(settings.EMOTION_AUTOMATION_RULES_PATH, "r") as f:
-                self.automation_rules = json.load(f)
-            logger.info(f"Loaded {len(self.automation_rules)} automation rules")
-        except FileNotFoundError:
-            logger.info("No existing automation rules found")
+            path = settings.EMOTION_AUTOMATION_RULES_PATH
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    self.automation_rules = json.load(f)
+                logger.info(f"Loaded {len(self.automation_rules)} automation rules")
+            else:
+                logger.info("No existing automation rules found")
+        except Exception as e:
+            logger.warning(f"Could not load automation rules: {e}")
     
     async def _save_rules(self):
         """Save automation rules to storage."""
         try:
-            with open(settings.EMOTION_AUTOMATION_RULES_PATH, "w") as f:
+            path = settings.EMOTION_AUTOMATION_RULES_PATH
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
                 json.dump(self.automation_rules, f, indent=2)
             logger.info(f"Saved {len(self.automation_rules)} automation rules")
         except Exception as e:
