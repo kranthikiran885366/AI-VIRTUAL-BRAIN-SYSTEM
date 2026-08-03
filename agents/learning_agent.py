@@ -189,7 +189,7 @@ class LearningAgent(BaseAgent):
     
     async def create_learning_session(self, context: LearningContext) -> Dict[str, Any]:
         """Create a new learning session with full context."""
-        session_id = f"session-{uuid.uuid4().hex[:8]}"
+        session_id = context.session_id or f"session-{uuid.uuid4().hex[:8]}"
         session = {
             "session_id": session_id,
             "context": context.as_dict(),
@@ -405,16 +405,438 @@ class LearningAgent(BaseAgent):
         
         return recommendations
 
+    async def update_knowledge(self, knowledge_update: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply a knowledge update with full validation and tracing."""
+        update_id = f"update-{uuid.uuid4().hex[:8]}"
+        timestamp = datetime.utcnow().isoformat()
+        
+        update_record = {
+            "update_id": update_id,
+            "timestamp": timestamp,
+            "type": knowledge_update.get("type", "refinement"),  # refinement, correction, new_knowledge, merge
+            "domain": knowledge_update.get("domain", "general"),
+            "content": knowledge_update.get("content"),
+            "confidence": knowledge_update.get("confidence", 0.5),
+            "source": knowledge_update.get("source", "unknown"),
+            "affected_entries": [],
+            "validation_status": "pending",
+            "version_increment": 1,
+            "audit_trail": [],
+        }
+        
+        # Validate knowledge update
+        validation = self._validate_knowledge(knowledge_update)
+        update_record["validation_status"] = validation["status"]
+        
+        if validation["status"] != "valid":
+            logger.warning(f"Knowledge update {update_id} validation failed: {validation['errors']}")
+            update_record["errors"] = validation["errors"]
+            return update_record
+        
+        # Apply update
+        try:
+            affected = self._apply_knowledge_update(knowledge_update, update_record)
+            update_record["affected_entries"] = affected
+            update_record["validation_status"] = "applied"
+            
+            # Record in history
+            self.knowledge_updates.append(update_record)
+            if len(self.knowledge_updates) > self.max_history_size:
+                self.knowledge_updates = self.knowledge_updates[-self.max_history_size:]
+            
+            logger.info(f"Applied knowledge update {update_id}: {validation['status']}")
+        except Exception as e:
+            logger.error(f"Error applying knowledge update: {e}")
+            update_record["validation_status"] = "failed"
+            update_record["error"] = str(e)
+        
+        return update_record
+    
+    def _validate_knowledge(self, update: Dict) -> Dict[str, Any]:
+        """Validate a knowledge update."""
+        errors = []
+        
+        if not update.get("content"):
+            errors.append("Missing content")
+        
+        if update.get("confidence", 0.5) < 0 or update.get("confidence", 0.5) > 1.0:
+            errors.append("Invalid confidence value")
+        
+        if update.get("type") not in ["refinement", "correction", "new_knowledge", "merge"]:
+            errors.append("Invalid update type")
+        
+        return {
+            "status": "valid" if not errors else "invalid",
+            "errors": errors,
+        }
+    
+    def _apply_knowledge_update(self, update: Dict, record: Dict) -> List[str]:
+        """Apply a knowledge update to the knowledge base."""
+        affected = []
+        domain = update.get("domain", "general")
+        
+        if domain not in self.knowledge_base:
+            self.knowledge_base[domain] = {
+                "entries": [],
+                "created_at": datetime.utcnow().isoformat(),
+                "version": 1,
+                "confidence": 0.5,
+            }
+        
+        entry = {
+            "id": f"entry-{uuid.uuid4().hex[:8]}",
+            "content": update.get("content"),
+            "confidence": update.get("confidence", 0.5),
+            "created_at": datetime.utcnow().isoformat(),
+            "source": update.get("source", "unknown"),
+            "type": update.get("type", "refinement"),
+        }
+        
+        self.knowledge_base[domain]["entries"].append(entry)
+        self.knowledge_base[domain]["version"] += 1
+        self.knowledge_base[domain]["updated_at"] = datetime.utcnow().isoformat()
+        
+        affected.append(domain)
+        return affected
+    
+    async def apply_adaptation(self, strategy: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply an adaptation strategy with full tracking."""
+        adaptation_id = f"adapt-{uuid.uuid4().hex[:8]}"
+        timestamp = datetime.utcnow().isoformat()
+        
+        adaptation_record = {
+            "adaptation_id": adaptation_id,
+            "timestamp": timestamp,
+            "strategy": strategy,
+            "parameters": parameters,
+            "status": "initiated",
+            "components_affected": [],
+            "metrics_before": {},
+            "metrics_after": {},
+            "rollback_available": True,
+            "success": False,
+        }
+        
+        try:
+            # Apply adaptation based on strategy
+            components = self._apply_adaptation_strategy(strategy, parameters)
+            adaptation_record["components_affected"] = components
+            adaptation_record["status"] = "applied"
+            adaptation_record["success"] = True
+            
+            # Record metric
+            self.adaptation_log.append(adaptation_record)
+            if len(self.adaptation_log) > self.max_history_size:
+                self.adaptation_log = self.adaptation_log[-self.max_history_size:]
+            
+            logger.info(f"Applied adaptation {adaptation_id}: {strategy}")
+        except Exception as e:
+            logger.error(f"Error applying adaptation: {e}")
+            adaptation_record["status"] = "failed"
+            adaptation_record["error"] = str(e)
+        
+        return adaptation_record
+    
+    def _apply_adaptation_strategy(self, strategy: str, parameters: Dict) -> List[str]:
+        """Apply specific adaptation strategy."""
+        components_affected = []
+        
+        if strategy == "increase_confidence":
+            self.confidence_threshold = min(0.95, self.confidence_threshold + parameters.get("delta", 0.05))
+            components_affected.append("confidence_calibration")
+        
+        elif strategy == "increase_timeout":
+            self.config["timeout_multiplier"] = self.config.get("timeout_multiplier", 1.0) * parameters.get("factor", 1.5)
+            components_affected.append("execution_timing")
+        
+        elif strategy == "optimize_memory":
+            self.max_patterns = int(self.max_patterns * parameters.get("reduction_factor", 0.9))
+            self.max_experiences = int(self.max_experiences * parameters.get("reduction_factor", 0.9))
+            components_affected.append("memory_management")
+        
+        elif strategy == "adjust_learning_rate":
+            self.learning_interval_seconds = max(10, self.learning_interval_seconds + parameters.get("delta", 0))
+            components_affected.append("learning_schedule")
+        
+        elif strategy == "improve_error_handling":
+            components_affected.append("error_handling")
+        
+        elif strategy == "refine_heuristics":
+            components_affected.append("decision_heuristics")
+        
+        return components_affected
+    
+    async def analyze_performance(self) -> Dict[str, Any]:
+        """Analyze performance metrics comprehensively."""
+        if not self.performance_history:
+            return {"error": "No performance data available"}
+        
+        recent_window = self.performance_history[-self.performance_window_size:]
+        
+        # Calculate metrics
+        latencies = [p.get("latency_ms", 0) for p in recent_window]
+        success_rate = sum(1 for p in recent_window if p.get("success")) / len(recent_window)
+        error_rate = sum(1 for p in recent_window if not p.get("success")) / len(recent_window)
+        
+        analysis = {
+            "analysis_timestamp": datetime.utcnow().isoformat(),
+            "window_size": len(recent_window),
+            "success_rate": success_rate,
+            "error_rate": error_rate,
+            "latency_metrics": {
+                "average_ms": sum(latencies) / len(latencies) if latencies else 0,
+                "min_ms": min(latencies) if latencies else 0,
+                "max_ms": max(latencies) if latencies else 0,
+                "p95_ms": sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0,
+                "p99_ms": sorted(latencies)[int(len(latencies) * 0.99)] if latencies else 0,
+            },
+            "quality_score": self._calculate_quality_score(recent_window),
+            "health_status": self._assess_health(success_rate, error_rate),
+            "top_errors": self._get_top_errors(recent_window),
+            "trend": self._detect_trend(recent_window),
+        }
+        
+        return analysis
+    
+    def _calculate_quality_score(self, window: List[Dict]) -> float:
+        """Calculate overall quality score."""
+        if not window:
+            return 0.5
+        
+        success_rate = sum(1 for p in window if p.get("success")) / len(window)
+        avg_confidence = sum(p.get("confidence", 0.5) for p in window) / len(window)
+        error_rate = 1 - success_rate
+        
+        # Weight: 60% success, 30% confidence, 10% error prevention
+        score = (success_rate * 0.6) + (avg_confidence * 0.3) + ((1 - error_rate) * 0.1)
+        return max(0.0, min(1.0, score))
+    
+    def _assess_health(self, success_rate: float, error_rate: float) -> str:
+        """Assess system health."""
+        if success_rate > 0.95:
+            return "excellent"
+        elif success_rate > 0.85:
+            return "good"
+        elif success_rate > 0.70:
+            return "acceptable"
+        elif success_rate > 0.50:
+            return "degraded"
+        else:
+            return "critical"
+    
+    def _get_top_errors(self, window: List[Dict]) -> List[Dict]:
+        """Get most common errors."""
+        error_counts = {}
+        for perf in window:
+            if not perf.get("success") and "error" in perf:
+                error_key = perf["error"]
+                error_counts[error_key] = error_counts.get(error_key, 0) + 1
+        
+        return sorted(
+            [{"error": e, "count": c} for e, c in error_counts.items()],
+            key=lambda x: x["count"],
+            reverse=True
+        )[:5]
+    
+    def _detect_trend(self, window: List[Dict]) -> str:
+        """Detect performance trend."""
+        if len(window) < 2:
+            return "unknown"
+        
+        first_half = window[:len(window) // 2]
+        second_half = window[len(window) // 2:]
+        
+        first_success = sum(1 for p in first_half if p.get("success")) / len(first_half)
+        second_success = sum(1 for p in second_half if p.get("success")) / len(second_half)
+        
+        delta = second_success - first_success
+        
+        if delta > 0.05:
+            return "improving"
+        elif delta < -0.05:
+            return "degrading"
+        else:
+            return "stable"
+    
     async def _process_emotions(self):
+        """Process emotions based on recent performance."""
         recent = self.adaptation_log[-10:]
         if not recent:
             return
         rate = sum(1 for a in recent if a.get("success", True)) / len(recent)
-        if rate > 0.7:
+        
+        if rate > 0.8:
             await self.update_emotion("happiness", min(1.0, self.emotions.get("happiness", 0.5) + 0.05))
+            await self.update_emotion("confidence", min(1.0, self.emotions.get("confidence", 0.7) + 0.05))
         elif rate < 0.3:
             await self.update_emotion("sadness", min(1.0, self.emotions.get("sadness", 0.0) + 0.05))
+            await self.update_emotion("confidence", max(0.1, self.emotions.get("confidence", 0.7) - 0.05))
 
+    async def replay_experiences(self, filter_criteria: Optional[Dict] = None, limit: int = 10) -> List[Dict]:
+        """Replay stored experiences for continued learning."""
+        candidates = self.replay_buffer
+        
+        # Apply filters
+        if filter_criteria:
+            if "classification" in filter_criteria:
+                candidates = [e for e in candidates if e.classification == filter_criteria["classification"]]
+            if "min_confidence" in filter_criteria:
+                candidates = [e for e in candidates if e.confidence >= filter_criteria["min_confidence"]]
+            if "days_old" in filter_criteria:
+                cutoff_date = datetime.utcnow() - timedelta(days=filter_criteria["days_old"])
+                candidates = [e for e in candidates if datetime.fromisoformat(e.timestamp) >= cutoff_date]
+        
+        # Priority replay: failures first, then edge cases, then successes
+        def priority_score(exp: ExperienceRecord) -> Tuple[int, float]:
+            priority_map = {
+                "failure": 0,
+                "timeout": 1,
+                "edge_case": 2,
+                "anomaly": 3,
+                "partial_success": 4,
+                "recovery": 5,
+                "retry": 6,
+                "success": 7,
+            }
+            priority = priority_map.get(exp.classification, 8)
+            return (priority, -exp.confidence)  # Higher confidence = lower sort value
+        
+        candidates.sort(key=priority_score)
+        
+        replayed = []
+        for exp in candidates[:limit]:
+            replay_record = {
+                "experience_id": exp.experience_id,
+                "session_id": exp.session_id,
+                "classification": exp.classification,
+                "timestamp": exp.timestamp,
+                "recommendations": exp.recommendations,
+                "affected_components": exp.affected_components,
+                "root_cause": exp.root_cause,
+                "patterns_detected": exp.patterns_detected,
+                "replayed_at": datetime.utcnow().isoformat(),
+            }
+            replayed.append(replay_record)
+        
+        logger.info(f"Replayed {len(replayed)} experiences")
+        return replayed
+    
+    async def evaluate_performance(self, focus_area: Optional[str] = None) -> Dict[str, Any]:
+        """Comprehensive self-evaluation of system performance."""
+        evaluation = {
+            "evaluation_timestamp": datetime.utcnow().isoformat(),
+            "learning_cycles": self.total_learning_cycles,
+            "experiences_processed": self.total_experiences_processed,
+        }
+        
+        # Performance analysis
+        if focus_area is None or focus_area == "performance":
+            evaluation["performance"] = await self.analyze_performance()
+        
+        # Error analysis
+        if focus_area is None or focus_area == "errors":
+            evaluation["error_analysis"] = {
+                "error_patterns_detected": len(self.error_patterns),
+                "recurring_failures": len([e for e in self.error_patterns.values() if e["count"] >= self.failure_pattern_threshold]),
+                "most_common_errors": self._get_most_common_errors(),
+            }
+        
+        # Knowledge base evaluation
+        if focus_area is None or focus_area == "knowledge":
+            evaluation["knowledge_evaluation"] = {
+                "domains": len(self.knowledge_base),
+                "total_entries": sum(len(kb.get("entries", [])) for kb in self.knowledge_base.values()),
+                "average_confidence": self._calculate_avg_knowledge_confidence(),
+                "update_frequency": len(self.knowledge_updates),
+            }
+        
+        # Adaptation effectiveness
+        if focus_area is None or focus_area == "adaptations":
+            evaluation["adaptation_effectiveness"] = {
+                "total_adaptations": len(self.adaptation_log),
+                "successful_adaptations": len([a for a in self.adaptation_log if a.get("success")]),
+                "strategies_used": list(set(a.get("strategy") for a in self.adaptation_log)),
+            }
+        
+        # Learning session analysis
+        if focus_area is None or focus_area == "sessions":
+            evaluation["session_analysis"] = {
+                "total_sessions": len(self.learning_sessions),
+                "completed_sessions": len([s for s in self.learning_sessions.values() if s["status"] == LearningSessionStatus.COMPLETED.value]),
+                "failed_sessions": len([s for s in self.learning_sessions.values() if s["status"] == LearningSessionStatus.FAILED.value]),
+            }
+        
+        # Improvement recommendations
+        if focus_area is None or focus_area == "recommendations":
+            evaluation["recommendations"] = self._generate_system_recommendations()
+        
+        return evaluation
+    
+    def _get_most_common_errors(self) -> List[Dict]:
+        """Get most common errors across all patterns."""
+        sorted_patterns = sorted(
+            self.error_patterns.items(),
+            key=lambda x: x[1]["count"],
+            reverse=True
+        )
+        return [{"error_hash": h, "count": p["count"], "first_seen": p["first_seen"]} for h, p in sorted_patterns[:5]]
+    
+    def _calculate_avg_knowledge_confidence(self) -> float:
+        """Calculate average confidence of knowledge base."""
+        all_confidence = []
+        for domain_data in self.knowledge_base.values():
+            for entry in domain_data.get("entries", []):
+                all_confidence.append(entry.get("confidence", 0.5))
+        
+        return sum(all_confidence) / len(all_confidence) if all_confidence else 0.5
+    
+    def _generate_system_recommendations(self) -> List[Dict]:
+        """Generate recommendations for system improvement."""
+        recommendations = []
+        
+        # Performance recommendations
+        perf = self.performance_history[-10:] if self.performance_history else []
+        if perf:
+            success_rate = sum(1 for p in perf if p.get("success")) / len(perf)
+            if success_rate < 0.85:
+                recommendations.append({
+                    "category": "performance",
+                    "priority": "high",
+                    "recommendation": f"Improve success rate (current: {success_rate:.1%})"
+                })
+        
+        # Knowledge recommendations
+        if not self.knowledge_base:
+            recommendations.append({
+                "category": "knowledge",
+                "priority": "high",
+                "recommendation": "Build up knowledge base through continuous learning"
+            })
+        
+        # Error pattern recommendations
+        if self.error_patterns:
+            recurring = len([e for e in self.error_patterns.values() if e["count"] >= self.failure_pattern_threshold])
+            if recurring > 0:
+                recommendations.append({
+                    "category": "error_handling",
+                    "priority": "high",
+                    "recommendation": f"Address {recurring} recurring error patterns"
+                })
+        
+        return recommendations
+    
+    async def end_learning_session(self, session_id: str, status: str = "completed") -> Dict:
+        """Finalize a learning session."""
+        if session_id not in self.learning_sessions:
+            return {"error": f"Session {session_id} not found"}
+        
+        session = self.learning_sessions[session_id]
+        session["status"] = status
+        session["ended_at"] = datetime.utcnow().isoformat()
+        
+        logger.info(f"Ended learning session {session_id} with status {status}")
+        return session
+    
     async def learn_from_interaction(self, interaction: Dict) -> Dict:
         user_message = interaction.get("user_message", "")
         agent_response = interaction.get("agent_response", "")
@@ -452,20 +874,28 @@ class LearningAgent(BaseAgent):
 
         topic = self._extract_topic(user_message)
         if topic:
+            # Backward compatible legacy knowledge_base storage (separate from Phase 7)
             if topic not in self.knowledge_base:
                 self.knowledge_base[topic] = {
                     "first_seen": datetime.utcnow().isoformat(),
                     "frequency": 0,
                     "agents_used": [],
                     "sample_queries": [],
+                    "_legacy_format": True,  # Mark as legacy format
                 }
             entry = self.knowledge_base[topic]
-            entry["frequency"] += 1
-            entry["last_seen"] = datetime.utcnow().isoformat()
-            if agent_used not in entry["agents_used"]:
-                entry["agents_used"].append(agent_used)
-            if len(entry["sample_queries"]) < 5:
-                entry["sample_queries"].append(user_message[:100])
+            # Handle both legacy and Phase 7 formats
+            if entry.get("_legacy_format"):
+                entry["frequency"] = entry.get("frequency", 0) + 1
+                entry["last_seen"] = datetime.utcnow().isoformat()
+                if agent_used not in entry.get("agents_used", []):
+                    if "agents_used" not in entry:
+                        entry["agents_used"] = []
+                    entry["agents_used"].append(agent_used)
+                if len(entry.get("sample_queries", [])) < 5:
+                    if "sample_queries" not in entry:
+                        entry["sample_queries"] = []
+                    entry["sample_queries"].append(user_message[:100])
 
         adaptation = {
             "id": str(uuid.uuid4()),
@@ -533,12 +963,28 @@ class LearningAgent(BaseAgent):
         return best_agent
 
     async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute learning tasks with comprehensive action handling."""
         action = task.get("action", "")
         input_data = task.get("input_data", {})
-
+        execution_context = task.get("execution_context", {})
+        
+        # Create learning context if available
+        learning_context = None
+        if execution_context:
+            learning_context = LearningContext(
+                request_id=execution_context.get("request_id", str(uuid.uuid4())),
+                correlation_id=execution_context.get("correlation_id", str(uuid.uuid4())),
+                trace_id=execution_context.get("trace_id", str(uuid.uuid4())),
+                session_id=execution_context.get("session_id", str(uuid.uuid4())),
+                conversation_id=execution_context.get("conversation_id"),
+                agent_id=execution_context.get("agent_id"),
+                user_id=execution_context.get("user_id"),
+            )
+        
+        # Legacy actions for backward compatibility
         if action in ("learn", "learn_from_interaction"):
             return await self.learn_from_interaction(input_data)
-
+        
         if action == "get_preferences":
             user_id = input_data.get("user_id", "default")
             preferred = self.get_user_agent_preference(user_id)
@@ -548,20 +994,86 @@ class LearningAgent(BaseAgent):
                 "top_topics": self._get_top_topics(10),
                 "total_interactions": len(self.interaction_patterns),
             }
-
+        
         if action == "get_stats":
             return {
                 "knowledge_base_size": len(self.knowledge_base),
                 "user_preferences": len(self.user_preferences),
                 "interaction_patterns": len(self.interaction_patterns),
                 "adaptation_count": len(self.adaptation_log),
+                "experience_count": len(self.experience_records),
                 "top_topics": self._get_top_topics(5),
+                "total_learning_cycles": self.total_learning_cycles,
             }
-
+        
         if action == "get_topic_knowledge":
             topic = input_data.get("topic", "")
             return self.knowledge_base.get(topic, {"error": "topic not found"})
-
+        
+        # Phase 7: Learning lifecycle
+        if action == "create_session":
+            context = learning_context or LearningContext(
+                request_id=str(uuid.uuid4()),
+                correlation_id=str(uuid.uuid4()),
+                trace_id=str(uuid.uuid4()),
+                session_id=str(uuid.uuid4()),
+            )
+            return await self.create_learning_session(context)
+        
+        if action == "start_session":
+            session_id = input_data.get("session_id")
+            return await self.start_learning_session(session_id)
+        
+        if action == "record_experience":
+            session_id = input_data.get("session_id")
+            experience = input_data.get("experience", {})
+            record = await self.record_experience(session_id, experience)
+            return record.as_dict()
+        
+        if action == "end_session":
+            session_id = input_data.get("session_id")
+            status = input_data.get("status", "completed")
+            return await self.end_learning_session(session_id, status)
+        
+        # Phase 7: Knowledge management
+        if action == "update_knowledge":
+            return await self.update_knowledge(input_data)
+        
+        # Phase 7: Adaptation engine
+        if action == "apply_adaptation":
+            strategy = input_data.get("strategy")
+            parameters = input_data.get("parameters", {})
+            return await self.apply_adaptation(strategy, parameters)
+        
+        # Phase 7: Performance analysis
+        if action == "analyze_performance":
+            return await self.analyze_performance()
+        
+        # Phase 7: Self-evaluation
+        if action == "evaluate_performance":
+            focus_area = input_data.get("focus_area")
+            return await self.evaluate_performance(focus_area)
+        
+        # Phase 7: Experience replay
+        if action == "replay_experiences":
+            filter_criteria = input_data.get("filter", {})
+            limit = input_data.get("limit", 10)
+            return await self.replay_experiences(filter_criteria, limit)
+        
+        # Phase 7: Get learning analytics
+        if action == "get_learning_analytics":
+            return {
+                "total_sessions": len(self.learning_sessions),
+                "total_experiences": len(self.experience_records),
+                "total_knowledge_updates": len(self.knowledge_updates),
+                "error_patterns": len(self.error_patterns),
+                "adaptation_count": len(self.adaptation_log),
+                "learning_cycles": self.total_learning_cycles,
+                "quality_score": self.state.get("quality_score", 0.7),
+                "confidence_score": self.state.get("confidence_score", 0.6),
+            }
+        
+        # Default: legacy learn_from_interaction
         return await self.learn_from_interaction({
             "user_message": input_data.get("content", ""),
             "agent_used": input_data.get("agent_used", "orchestrator_agent"),
