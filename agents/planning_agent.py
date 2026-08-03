@@ -935,9 +935,163 @@ class PlanningAgent(BaseAgent):
         await self._update_state()
         return plan
 
+    async def adapt_plan(self, plan_id: str, changes: Dict[str, Any]) -> Dict:
+        """Adaptively update plan based on execution feedback."""
+        plan = self.active_plans.get(plan_id)
+        if not plan:
+            return {"error": "Plan not found"}
+        
+        # Capture adapter state
+        plan["plan_state"]["adapted_at"] = datetime.utcnow().isoformat()
+        plan["plan_state"]["adaptations_count"] = plan["plan_state"].get("adaptations_count", 0) + 1
+        
+        # Apply individual changes
+        if "goal" in changes:
+            plan["goal"] = changes["goal"]
+        if "constraints" in changes:
+            plan["constraints"].extend(changes["constraints"])
+        if "resources" in changes:
+            plan["plan_context"]["resources"] = changes["resources"]
+        
+        # Recalculate affected sections without full replan
+        updated_at = datetime.utcnow().isoformat()
+        plan["updated_at"] = updated_at
+        plan["plan_state"]["status"] = "adapted"
+        
+        # Log adaptation
+        plan["plan_audit"].append({
+            "event": "plan_adapted",
+            "timestamp": updated_at,
+            "plan_id": plan_id,
+            "changes": list(changes.keys()),
+        })
+        
+        return plan
+    
+    async def get_plan_progress(self, plan_id: str) -> Dict:
+        """Get detailed progress metrics for a plan."""
+        plan = self.active_plans.get(plan_id)
+        if not plan:
+            completed_plan = next((p for p in self.completed_plans if p["id"] == plan_id), None)
+            if not completed_plan:
+                return {"error": "Plan not found"}
+            plan = completed_plan
+        
+        state = plan.get("plan_state", {})
+        milestones = plan.get("milestones", [])
+        
+        completed_count = sum(1 for m in milestones if m.get("status") == "completed")
+        failed_count = sum(1 for m in milestones if m.get("status") == "failed")
+        cancelled_count = sum(1 for m in milestones if m.get("status") == "cancelled")
+        blocked_count = sum(1 for m in milestones if m.get("status") == "blocked")
+        waiting_count = sum(1 for m in milestones if m.get("status") == "waiting")
+        running_count = sum(1 for m in milestones if m.get("status") == "running")
+        
+        total_hours = sum(m.get("estimated_hours", 6) for m in milestones)
+        completed_hours = sum(m.get("estimated_hours", 6) for m in milestones if m.get("status") == "completed")
+        
+        return {
+            "plan_id": plan_id,
+            "goal": plan.get("goal"),
+            "status": plan.get("status"),
+            "overall_progress": state.get("progress", 0.0),
+            "task_breakdown": {
+                "total": len(milestones),
+                "completed": completed_count,
+                "failed": failed_count,
+                "cancelled": cancelled_count,
+                "blocked": blocked_count,
+                "waiting": waiting_count,
+                "running": running_count,
+                "pending": len(milestones) - (completed_count + failed_count + cancelled_count + blocked_count + waiting_count + running_count),
+            },
+            "effort_metrics": {
+                "total_estimated_hours": total_hours,
+                "completed_hours": completed_hours,
+                "progress_percentage": round((completed_hours / total_hours * 100) if total_hours > 0 else 0, 1),
+            },
+            "execution_health": self._assess_plan_health(plan),
+            "created_at": plan.get("created_at"),
+            "updated_at": plan.get("updated_at"),
+        }
+    
+    def _assess_plan_health(self, plan: Dict) -> Dict:
+        """Assess overall health of a plan."""
+        state = plan.get("plan_state", {})
+        risks = plan.get("risks", [])
+        milestones = plan.get("milestones", [])
+        
+        failed_count = sum(1 for m in milestones if m.get("status") == "failed")
+        blocked_count = sum(1 for m in milestones if m.get("status") == "blocked")
+        
+        # Health score calculation
+        failure_rate = failed_count / len(milestones) if milestones else 0
+        blockage_rate = blocked_count / len(milestones) if milestones else 0
+        risk_score = max((r.get("score", 0) for r in risks), default=0)
+        
+        health_score = max(0, 1.0 - (failure_rate * 0.3 + blockage_rate * 0.3 + risk_score * 0.4))
+        
+        if health_score > 0.8:
+            status = "healthy"
+        elif health_score > 0.6:
+            status = "at_risk"
+        elif health_score > 0.4:
+            status = "poor"
+        else:
+            status = "critical"
+        
+        return {
+            "status": status,
+            "score": round(health_score, 3),
+            "failure_rate": round(failure_rate, 3),
+            "blockage_rate": round(blockage_rate, 3),
+            "risk_exposure": round(risk_score, 3),
+        }
+    
+    async def get_plan_analytics(self, plan_id: str = None) -> Dict:
+        """Get comprehensive analytics for one or all plans."""
+        if plan_id:
+            plans = [self.active_plans.get(plan_id)] if plan_id in self.active_plans else []
+            if not plans and any(p["id"] == plan_id for p in self.completed_plans):
+                plans = [next(p for p in self.completed_plans if p["id"] == plan_id)]
+        else:
+            plans = list(self.active_plans.values()) + self.completed_plans
+        
+        if not plans:
+            return {"error": "No plans found"}
+        
+        total_goals = len(plans)
+        completed_goals = sum(1 for p in plans if p.get("status") == "completed")
+        total_tasks = sum(len(p.get("milestones", [])) for p in plans)
+        total_risks = sum(len(p.get("risks", [])) for p in plans)
+        
+        avg_confidence = sum(p.get("explanation", {}).get("confidence", 0.7) for p in plans) / len(plans) if plans else 0
+        
+        return {
+            "total_plans": total_goals,
+            "completed_plans": completed_goals,
+            "active_plans": len(self.active_plans),
+            "total_tasks": total_tasks,
+            "total_risks": total_risks,
+            "average_confidence": round(avg_confidence, 3),
+            "plans": [
+                {
+                    "plan_id": p["id"],
+                    "goal": p.get("goal"),
+                    "status": p.get("status"),
+                    "progress": p.get("progress", 0),
+                    "task_count": len(p.get("milestones", [])),
+                    "confidence": p.get("explanation", {}).get("confidence", 0),
+                }
+                for p in plans
+            ],
+        }
+
     async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         action = task.get("action", "")
         data = task.get("input_data", {})
+        
+        # Plan creation and management
         if action in ("create", "plan", "create_plan"):
             return await self.create_plan(
                 goal=data.get("goal", data.get("content", "")),
@@ -945,8 +1099,16 @@ class PlanningAgent(BaseAgent):
                 constraints=data.get("constraints", []),
                 context=data.get("context") or {},
             )
+        
+        # Milestone updates and execution tracking
         if action == "update_milestone":
-            return await self.update_milestone(data.get("plan_id", ""), data.get("milestone_id", ""), data.get("status", "completed"))
+            return await self.update_milestone(
+                data.get("plan_id", ""),
+                data.get("milestone_id", ""),
+                data.get("status", "completed")
+            )
+        
+        # Dynamic replanning
         if action == "replan":
             return await self.replan(
                 plan_id=data.get("plan_id", ""),
@@ -955,11 +1117,41 @@ class PlanningAgent(BaseAgent):
                 constraints=data.get("constraints", []),
                 context=data.get("context") or {},
             )
+        
+        # Adaptive plan updates
+        if action == "adapt_plan":
+            return await self.adapt_plan(
+                data.get("plan_id", ""),
+                data.get("changes", {})
+            )
+        
+        # Plan retrieval
         if action == "get_plan":
             plan = self.active_plans.get(data.get("plan_id", ""))
             if plan:
                 return plan
-            return self.completed_plans[-1] if self.completed_plans else {"error": "Plan not found"}
+            completed = next((p for p in self.completed_plans if p.get("id") == data.get("plan_id")), None)
+            return completed or {"error": "Plan not found"}
+        
+        # Plan listing
         if action == "list_plans":
-            return {"active": list(self.active_plans.values()), "completed": self.completed_plans[-10:], "total_active": len(self.active_plans), "total_completed": len(self.completed_plans)}
-        return await self.create_plan(goal=data.get("content", data.get("goal", "achieve the objective")), timeframe=data.get("timeframe"))
+            return {
+                "active": list(self.active_plans.values()),
+                "completed": self.completed_plans[-10:],
+                "total_active": len(self.active_plans),
+                "total_completed": len(self.completed_plans),
+            }
+        
+        # Progress tracking
+        if action == "get_progress":
+            return await self.get_plan_progress(data.get("plan_id", ""))
+        
+        # Analytics
+        if action == "get_analytics":
+            return await self.get_plan_analytics(data.get("plan_id"))
+        
+        # Default: create plan from goal
+        return await self.create_plan(
+            goal=data.get("content", data.get("goal", "achieve the objective")),
+            timeframe=data.get("timeframe")
+        )
