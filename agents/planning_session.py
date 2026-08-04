@@ -18,13 +18,22 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
-from planning_models import (
-    PlanStatus,
-    PlanSession,
-    PlanVersion,
-    AuditRecord,
-    ProductionPlan,
-)
+try:
+    from agents.planning_models import (
+        PlanStatus,
+        PlanSession,
+        PlanVersion,
+        AuditRecord,
+        ProductionPlan,
+    )
+except ImportError:
+    from planning_models import (  # type: ignore[no-redef]
+        PlanStatus,
+        PlanSession,
+        PlanVersion,
+        AuditRecord,
+        ProductionPlan,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -650,3 +659,20 @@ class PlanAuditTrail:
             "version": self.version,
             "max_audit_records": self.max_audit_records,
         }
+
+
+# ── Sync-compatible PlanningSession facade (test API) ─────────────────────
+
+class PlanningSession:
+    """Sync-compatible planning session for tests."""
+
+    def __init__(self, config=None):
+        self._mgr = PlanningSessionManager(config)
+        self._sessions: Dict[str, Dict[str, Any]] = {}
+
+    def create_session(self, user: str, name: str) -> Dict[str, Any]:
+        import asyncio, uuid
+        session_id = str(uuid.uuid4())
+        session = {"session_id": session_id, "user": user, "name": name, "status": "active"}
+        self._sessions[session_id] = session
+        return session

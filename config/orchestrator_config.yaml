@@ -152,4 +152,112 @@ performance:
   cache_ttl: 300  # 5 minutes
   connection_pool_size: 20
   thread_pool_size: 10
-  async_operations: true 
+  async_operations: true
+
+# Phase 14 Autonomous Cognitive Coordination & Self-Improvement
+autonomous_controller:
+  enabled: true
+  cycle_interval_seconds: 10.0
+
+self_monitoring:
+  interval_seconds: 10.0
+  history_limit: 200
+  cpu_warn_threshold: 85.0
+  mem_warn_threshold: 85.0
+  error_rate_warn: 0.10
+  latency_warn_ms: 2000.0
+  queue_depth_warn: 500
+
+self_healing:
+  enabled: true
+  max_restart_attempts: 3
+  cooldown_seconds: 10.0
+
+optimization:
+  enabled: true
+  target_latency_ms: 1000.0
+  target_cpu_percent: 75.0
+
+self_improvement:
+  enabled: true
+  min_confidence_threshold: 0.60
+
+# Phase 15 Distributed Brain Infrastructure & Enterprise Deployment
+
+# Distributed Cluster
+distributed:
+  enabled: false
+  node_id: "node-primary"
+  discovery_url: null
+  heartbeat_interval_seconds: 15
+  leader_lease_ttl_seconds: 30
+  max_nodes: 10
+  replication_factor: 1
+  routing_strategy: "capability_based"  # capability_based, round_robin, least_loaded
+
+# Enterprise Security & Governance
+enterprise_security:
+  enabled: false
+  jwt_secret_key: null
+  api_key_header: "X-API-Key"
+  rbac_default_role: "viewer"
+  rbac_roles:
+    - admin
+    - operator
+    - viewer
+    - agent
+  tls_enabled: false
+  tls_cert_path: null
+  tls_key_path: null
+  audit_log:
+    enabled: true
+    max_entries: 10000
+    retention_hours: 720  # 30 days
+
+# Resilience & High Availability
+resilience:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout_seconds: 30.0
+    half_open_max_calls: 3
+    success_threshold: 2
+  bulkhead:
+    max_concurrent: 20
+    max_queue: 100
+  dead_letter_queue:
+    enabled: true
+    max_size: 10000
+    max_retries: 3
+    purge_after_hours: 72
+  disaster_recovery:
+    backup_interval_seconds: 3600
+    backup_retention_count: 24
+
+# Observability Platform
+observability_platform:
+  prometheus:
+    enabled: false
+    export_port: 9090
+  opentelemetry:
+    enabled: false
+    endpoint: null
+    sampling_rate: 1.0
+  grafana:
+    enabled: false
+    dashboard_auto_generate: false
+  slo:
+    availability_target: 99.9
+    latency_p99_target: 95.0
+
+# Enterprise Operations
+enterprise_ops:
+  maintenance_mode: false
+  feature_flags:
+    distributed_mode: false
+    advanced_security: true
+    circuit_breakers: true
+    observability_export: false
+  hot_reload: true
+  capacity_planning: true
+  upgrade_compatibility_check: true

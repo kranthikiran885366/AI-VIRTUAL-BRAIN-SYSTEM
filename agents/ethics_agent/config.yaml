@@ -1,0 +1,75 @@
+# Ethics, Governance & Safety Engine Configuration — Phase 11
+
+# Ethical Reasoning Framework Weights
+ethical_reasoning:
+  framework_weights:
+    utilitarian: 0.20
+    deontological: 0.20
+    virtue: 0.15
+    care: 0.15
+    organizational: 0.10
+    risk_based: 0.10
+    stakeholder: 0.05
+    context_sensitive: 0.05
+  confidence_threshold: 0.75
+
+# Governance Engine Settings
+governance:
+  enforce_strict_approval: true
+  auto_deactivate_expired_policies: true
+  max_policy_version: "2.0.0"
+
+# Compliance Engine Settings
+compliance:
+  default_standards: ["GDPR_baseline", "EU_AI_Act_baseline", "ISO_27001_baseline"]
+  audit_checkpoint_frequency: "per_execution"
+
+# Risk Assessment Thresholds
+risk_assessment:
+  critical_risk_threshold: 0.70
+  high_risk_threshold: 0.50
+  medium_risk_threshold: 0.30
+  stability_protection_enabled: true
+
+# Safety Engine Settings
+safety:
+  advisory_mode_only: true  # Safety advises, does not silently override
+  resource_memory_limit_percent: 90
+  dry_run_on_critical_hazards: true
+
+# Stakeholder Analysis Settings
+stakeholder_analysis:
+  default_priority_weights:
+    individuals: 0.40
+    organizations: 0.30
+    society: 0.30
+    environment: 0.25
+    future_generations: 0.25
+
+# Audit and Replay Settings
+audit_replay:
+  enabled: true
+  snapshot_persistence: true
+  max_audit_entries_per_session: 200
+
+# Storage Settings
+storage:
+  base_path: "data/ethics"
+  max_history_entries: 200
+
+# Performance Settings
+performance:
+  cache_size: 1000
+  cleanup_interval: 3600  # seconds
+  max_concurrent_requests: 20
+
+# Logging Settings
+logging:
+  level: "INFO"
+  file: "logs/ethics_agent.log"
+
+# Security Settings
+security:
+  max_requests_per_minute: 120
+  require_authentication: true
+  max_input_length: 10000

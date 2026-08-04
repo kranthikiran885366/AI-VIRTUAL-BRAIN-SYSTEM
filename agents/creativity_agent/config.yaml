@@ -1,4 +1,4 @@
-# Creativity Agent Configuration
+# Creativity Agent Configuration — Phase 10 Production Configuration
 
 # Idea generation settings
 idea_generation:
@@ -9,9 +9,50 @@ idea_generation:
     feasibility: 0.3
     impact: 0.3
   constraints:
-    min_originality: 0.6
-    min_feasibility: 0.5
-    min_impact: 0.4
+    min_originality: 0.4
+    min_feasibility: 0.35
+    min_impact: 0.30
+
+# Convergent Thinking settings
+convergent:
+  ranking_policy: "weighted_pareto"
+  min_acceptance_score: 0.5
+  max_recommendations: 3
+  risk_scoring_enabled: true
+  cost_benefit_analysis_enabled: true
+
+# Design Thinking settings
+design_thinking:
+  default_test_duration: "2 weeks"
+  user_personas_per_domain: 3
+  prototype_fidelities: ["low", "medium", "high"]
+  min_sus_score_target: 4.0
+
+# Concept Synthesis settings
+concept_synthesis:
+  max_source_domains: 5
+  fusion_confidence_threshold: 0.7
+  white_space_opportunity_limit: 5
+
+# Innovation Engine settings
+innovation:
+  default_type: "incremental"
+  supported_types:
+    - "incremental"
+    - "radical"
+    - "process"
+    - "product"
+    - "service"
+    - "workflow"
+    - "architecture"
+  plugins_enabled: true
+
+# Audit and Replay settings
+audit_replay:
+  enabled: true
+  max_audit_entries_per_session: 100
+  snapshot_persistence: true
+  auto_replay_verification: true
 
 # Pattern recognition settings
 pattern_recognition:
@@ -95,14 +136,13 @@ logging:
 # Model settings
 models:
   idea_generation:
-    provider: "openai"
-    model: "gpt-4"
+    provider: "huggingface"
+    model: "gpt2"
     temperature: 0.8
-    max_tokens: 1000
+    max_tokens: 200
   pattern_recognition:
-    provider: "tensorflow"
-    model: "bert-base"
-    embedding_size: 768
+    provider: "sklearn"
+    model: "tfidf_dbscan"
   inspiration:
     provider: "huggingface"
     model: "gpt2"
@@ -116,4 +156,4 @@ security:
   token_expiry: 3600  # seconds
   encryption:
     enabled: true
-    algorithm: "AES-256" 
+    algorithm: "AES-256"

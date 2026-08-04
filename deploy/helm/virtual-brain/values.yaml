@@ -1,0 +1,111 @@
+# AI Virtual Brain System — Helm Values
+# Override these values for your environment
+
+# Orchestrator
+orchestrator:
+  replicaCount: 2
+  image:
+    repository: vbrain-orchestrator
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 8001
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2000m"
+      memory: "2Gi"
+  env:
+    LOG_LEVEL: "INFO"
+    DEBUG: "false"
+    DISTRIBUTED_MODE: "true"
+    SECURITY_ENABLED: "true"
+    CIRCUIT_BREAKER_ENABLED: "true"
+    DLQ_ENABLED: "true"
+    PROMETHEUS_ENABLED: "true"
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Ingress
+ingress:
+  enabled: true
+  className: nginx
+  host: brain.example.com
+  tls:
+    enabled: true
+    secretName: vbrain-tls
+
+# PostgreSQL
+postgresql:
+  enabled: true
+  auth:
+    database: vbrain
+    username: vbrain
+    password: ""  # Set via --set or secrets
+  primary:
+    persistence:
+      size: 20Gi
+
+# Redis
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 2Gi
+
+# Kafka
+kafka:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    size: 10Gi
+
+# Prometheus
+prometheus:
+  enabled: true
+  server:
+    retention: 30d
+    persistentVolume:
+      size: 50Gi
+
+# Grafana
+grafana:
+  enabled: true
+  adminPassword: ""  # Set via --set or secrets
+  persistence:
+    size: 5Gi
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  minAvailable: 1
+
+# Service
+service:
+  type: ClusterIP
+  port: 8001
+
+# Persistence
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+
+# Security
+serviceAccount:
+  create: true
+  name: vbrain-sa
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000

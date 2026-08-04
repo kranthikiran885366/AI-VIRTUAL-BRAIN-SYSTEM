@@ -511,6 +511,67 @@ class PlanExplanation:
         return asdict(self)
 
 
+# ─── Compatibility Aliases (test-facing API) ────────────────────────────────
+
+class ConstraintType(str, Enum):
+    """Constraint type aliases for test compatibility."""
+    TIME = "time"
+    RESOURCE = "resource"
+    TECHNICAL = "technical"
+    BUSINESS = "business"
+
+
+@dataclass
+class Task:
+    """Simplified task for test compatibility."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    title: str = ""
+    description: str = ""
+    goal_id: str = ""
+    estimated_effort_hours: float = 0.0
+    status: TaskStatus = TaskStatus.PENDING
+    assigned_to: Optional[str] = None
+    depends_on: List[str] = field(default_factory=list)
+    start_time: Optional[Any] = None
+    end_time: Optional[Any] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"id": self.id, "title": self.title, "goal_id": self.goal_id,
+                "estimated_effort_hours": self.estimated_effort_hours,
+                "status": self.status.value if hasattr(self.status, 'value') else self.status}
+
+
+@dataclass
+class Plan:
+    """Simplified plan for test compatibility."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    title: str = ""
+    description: str = ""
+    goals: List[str] = field(default_factory=list)
+    status: PlanStatus = PlanStatus.DRAFT
+    tasks: List[Task] = field(default_factory=list)
+    created_at: Optional[Any] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"id": self.id, "title": self.title, "goals": self.goals,
+                "status": self.status.value if hasattr(self.status, 'value') else self.status,
+                "tasks": [t.to_dict() for t in self.tasks]}
+
+
+@dataclass
+class Constraint:
+    """Simplified constraint for test compatibility."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    type: ConstraintType = ConstraintType.TIME
+    goal_id: str = ""
+    description: str = ""
+    deadline: Optional[Any] = None
+
+    def __post_init__(self):
+        if self.type == ConstraintType.TIME and self.deadline is None:
+            raise ValueError("TIME constraint requires a deadline")
+
+
 # ─── Top-Level Plan Model ────────────────────────────────────────────────────
 
 @dataclass

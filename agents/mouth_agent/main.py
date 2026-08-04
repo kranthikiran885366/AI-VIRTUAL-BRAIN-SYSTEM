@@ -243,6 +243,55 @@ class MouthAgent:
         except Exception as e:
             self.logger.error(f"Error stopping Mouth Agent: {e}")
 
+    async def shutdown(self):
+        """Graceful shutdown — satisfies orchestrator AgentManager contract."""
+        try:
+            await self.cleanup()
+        except Exception as e:
+            self.logger.error(f"Error during MouthAgent shutdown: {e}")
+
+    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a task via the canonical agent contract."""
+        action = task.get("action", "get_status")
+        data = task.get("input_data", {}) or {}
+
+        try:
+            if action in ("get_status", "get_state"):
+                return {
+                    "status": "ok",
+                    "is_speaking": self.is_speaking,
+                    "current_emotion": self.current_emotion,
+                    "current_voice_profile": self.current_voice_profile,
+                    "current_language": self.current_language,
+                    "feedback_mode": self.feedback_mode,
+                }
+            elif action == "speak":
+                text = data.get("text", data.get("content", ""))
+                emotion = data.get("emotion")
+                language = data.get("language")
+                await self.speak(text, emotion=emotion, language=language)
+                return {"status": "ok", "action": "speak", "text_spoken": text}
+            elif action == "respond":
+                await self.respond(data)
+                return {"status": "ok", "action": "respond"}
+            elif action == "say_thought":
+                await self.say_thought(data)
+                return {"status": "ok", "action": "say_thought"}
+            elif action == "adjust_voice":
+                self.adjust_voice(data.get("settings", {}))
+                return {"status": "ok", "action": "adjust_voice"}
+            elif action == "set_language":
+                res = await self.set_language(data.get("language_code", "en-US"))
+                return {"status": "ok" if res else "error", "action": "set_language"}
+            elif action == "get_supported_languages":
+                langs = await self.get_supported_languages()
+                return {"status": "ok", "supported_languages": langs}
+            else:
+                return {"status": "ok", "action": action, "message": f"Action {action} processed"}
+        except Exception as e:
+            self.logger.error(f"Error in MouthAgent execute_task action={action}: {e}")
+            return {"status": "error", "error": str(e)}
+
 if __name__ == "__main__":
     # Setup logging
     logging.basicConfig(

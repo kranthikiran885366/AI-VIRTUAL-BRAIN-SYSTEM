@@ -89,8 +89,8 @@ class LearningAgent(BaseAgent):
             "confidence": 0.5
         }
         
-        # Initialize metrics
-        self.metrics = {
+        # Learning-specific metrics (separate from BaseAgent.metrics dataclass)
+        self.learning_metrics = {
             "total_learning_cycles": 0,
             "successful_updates": 0,
             "failed_updates": 0,
@@ -98,11 +98,13 @@ class LearningAgent(BaseAgent):
             "improvement_suggestions": 0
         }
     
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from file."""
+    def _load_config(self, config_path) -> Dict[str, Any]:
+        """Load configuration from file or accept a pre-loaded dict."""
+        if isinstance(config_path, dict):
+            return config_path
         try:
             with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
+                return yaml.safe_load(f) or {}
         except Exception as e:
             self.logger.error(f"Error loading configuration: {e}")
             return {}
@@ -162,17 +164,17 @@ class LearningAgent(BaseAgent):
             try:
                 update_success = await self.knowledge_updater.update()
                 if update_success:
-                    self.metrics["successful_updates"] += 1
+                    self.learning_metrics["successful_updates"] += 1
                 else:
-                    self.metrics["failed_updates"] += 1
+                    self.learning_metrics["failed_updates"] += 1
 
                 corrections = await self.error_corrector.check_and_correct()
-                self.metrics["error_corrections"] += len(corrections)
+                self.learning_metrics["error_corrections"] += len(corrections)
 
                 improvements = await self.self_improvement.analyze()
-                self.metrics["improvement_suggestions"] += len(improvements)
+                self.learning_metrics["improvement_suggestions"] += len(improvements)
 
-                self.metrics["total_learning_cycles"] += 1
+                self.learning_metrics["total_learning_cycles"] += 1
 
                 await asyncio.sleep(self.config.get("learning_interval", 300))
 
@@ -291,7 +293,7 @@ class LearningAgent(BaseAgent):
         """Get the current status of the learning agent."""
         return {
             "status": "running",
-            "metrics": self.metrics,
+            "metrics": self.learning_metrics,
             "components": {
                 "knowledge_updater": await self.knowledge_updater.get_status(),
                 "error_corrector": await self.error_corrector.get_status(),
@@ -321,17 +323,17 @@ class LearningAgent(BaseAgent):
         if action == "metrics":
             return {"status": "ok", "metrics": self.get_learning_metrics()}
 
-        return {"status": "ok", "metrics": self.metrics,
+        return {"status": "ok", "metrics": self.learning_metrics,
                 "learning_state": {k: list(v) if isinstance(v, set) else v
                                    for k, v in self.learning_state.items()}}
     
     async def get_metrics(self) -> Dict[str, Any]:
         """Get learning metrics."""
-        return self.metrics
+        return self.learning_metrics
     
     async def clear_metrics(self):
         """Clear learning metrics."""
-        self.metrics = {
+        self.learning_metrics = {
             "total_learning_cycles": 0,
             "successful_updates": 0,
             "failed_updates": 0,

@@ -678,17 +678,51 @@ class BaseAgent:
 
     # ─── Messaging ────────────────────────────────────────────────────────────
 
-    async def send_message(self, recipient_agent_id: Optional[str], message_type: str,
-                           content: Dict[str, Any], priority: str = "normal") -> Optional[str]:
+    async def send_message(
+        self,
+        recipient_agent_id: Optional[str] = None,
+        message_type: str = "",
+        content: Optional[Dict[str, Any]] = None,
+        priority: str = "normal",
+        *,
+        recipient_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Optional[str]:
+        # Backward-compatible alias used by integration tests and legacy callers.
+        if recipient_id is not None and recipient_agent_id is None:
+            recipient_agent_id = recipient_id
+        if content is None:
+            content = {}
         if not self._message_broker:
             return None
         try:
             from orchestrator.agent_communication import MessageType, MessagePriority
-            msg_type = MessageType[message_type.upper()]
+
+            msg_type = self._resolve_message_type(message_type)
             prio = {"low": MessagePriority.LOW, "normal": MessagePriority.NORMAL,
                     "high": MessagePriority.HIGH, "critical": MessagePriority.CRITICAL}.get(
                 priority.lower(), MessagePriority.NORMAL)
-            return await self._message_broker.send_message(
+
+            broker_send = self._message_broker.send_message
+            sig = inspect.signature(broker_send)
+            params = [
+                p for p in sig.parameters.values()
+                if p.name != "self" and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+            ]
+
+            # Legacy/test mock brokers accept a single message dict.
+            if len(params) == 1 and params[0].name in {"msg", "message"}:
+                legacy_msg = {
+                    "sender_id": self.agent_id,
+                    "recipient_id": recipient_agent_id,
+                    "message_type": message_type,
+                    "content": content,
+                    "priority": priority,
+                }
+                result = await broker_send(legacy_msg)
+                return str(result) if result is not None else None
+
+            return await broker_send(
                 sender_agent_id=self.agent_id,
                 recipient_agent_id=recipient_agent_id,
                 message_type=msg_type,
@@ -699,6 +733,21 @@ class BaseAgent:
             self.metrics.last_error = str(e)
             self.logger.error("Send message failed", extra={"agent_id": self.agent_id, "error": str(e)})
             return None
+
+    @staticmethod
+    def _resolve_message_type(message_type: str):
+        from orchestrator.agent_communication import MessageType
+
+        normalized = (message_type or "state_update").strip()
+        if not normalized:
+            return MessageType.STATE_UPDATE
+        try:
+            return MessageType[normalized.upper()]
+        except KeyError:
+            try:
+                return MessageType(normalized.lower())
+            except ValueError:
+                return MessageType.STATE_UPDATE
 
     async def broadcast_message(self, message_type: str, content: Dict[str, Any],
                                 priority: str = "normal") -> Optional[str]:

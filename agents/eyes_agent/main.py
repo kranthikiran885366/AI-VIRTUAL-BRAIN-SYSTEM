@@ -16,8 +16,17 @@ from .utils import setup_logging, load_config
 class EyesAgent:
     def __init__(self, config_path: str = "config/eyes_config.yaml"):
         """Initialize the eyes agent with configuration."""
-        self.config = load_config(config_path)
-        self.logger = setup_logging("eyes_agent", self.config["logging"])
+        # AgentManager may pass a dict instead of a path string — handle both
+        if isinstance(config_path, dict):
+            self.config = config_path if config_path else load_config("config/eyes_config.yaml")
+        else:
+            self.config = load_config(config_path)
+        log_cfg = self.config.get("logging", {})
+        setup_logging(
+            level=log_cfg.get("level", "INFO") if isinstance(log_cfg, dict) else "INFO",
+            output_dir=log_cfg.get("output_dir", "logs") if isinstance(log_cfg, dict) else "logs",
+        )
+        self.logger = logging.getLogger("eyes_agent")
         
         # Initialize components
         self.camera = CameraInterface(self.config["camera"])
@@ -187,6 +196,46 @@ class EyesAgent:
             self.logger.error(f"Failed to update configuration: {str(e)}")
             raise
 
+    # ── AgentManager-compatible lifecycle methods ─────────────────────────────
+
+    async def initialize(self) -> None:
+        """Called by AgentManager on load."""
+        self.logger.info("EyesAgent initializing (camera/GPU optional)")
+        # Don't start camera/processing loop here — only on explicit start()
+
+    async def shutdown(self) -> None:
+        """Called by AgentManager on stop."""
+        if self.is_running:
+            await self.stop()
+
+    async def get_health(self) -> Dict[str, Any]:
+        """Return health dict compatible with AgentManager monitor."""
+        return {
+            "status": "healthy",
+            "healthy": True,
+            "agent_id": "eyes_agent",
+            "is_running": self.is_running,
+        }
+
+    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Called by AgentManager.execute_agent_with_timeout."""
+        action = task.get("action", "get_status")
+        if action == "get_status":
+            return await self.get_status()
+        if action == "get_health":
+            return await self.get_health()
+        if action == "start":
+            await self.start()
+            return {"status": "started"}
+        if action == "stop":
+            await self.stop()
+            return {"status": "stopped"}
+        if action == "get_objects":
+            return {"objects": self.detected_objects, "count": len(self.detected_objects)}
+        if action == "get_faces":
+            return {"faces": self.tracked_faces, "count": len(self.tracked_faces)}
+        return {"status": "ok", "action": action}
+
 def main():
     """Main entry point for the eyes agent system."""
     try:
@@ -199,6 +248,3 @@ def main():
     finally:
         if 'agent' in locals():
             asyncio.run(agent.stop())
-
-if __name__ == "__main__":
-    main() 

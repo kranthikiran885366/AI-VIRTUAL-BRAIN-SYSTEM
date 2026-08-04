@@ -171,8 +171,12 @@ class LanguageDetector:
 
     def _detect_heuristic(self, text: str) -> List[Dict[str, Any]]:
         ts = datetime.utcnow().isoformat()
-        for lang, pattern in _CHARSET_PATTERNS:
-            if pattern.search(text):
+        # Hiragana/katakana take precedence over shared CJK kanji blocks.
+        priority = ("ja", "ko", "zh", "ar", "ru", "hi")
+        patterns = {lang: pattern for lang, pattern in _CHARSET_PATTERNS}
+        for lang in priority:
+            pattern = patterns.get(lang)
+            if pattern and pattern.search(text):
                 return [{"language": lang, "confidence": 0.80, "timestamp": ts, "backend": "heuristic"}]
         return [{"language": "en", "confidence": 0.60, "timestamp": ts, "backend": "heuristic"}]
 

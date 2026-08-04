@@ -1,0 +1,160 @@
+# Emotion & Motivation Engine Configuration — Phase 8
+# All operational parameters are externalized here.
+
+emotion:
+  version: "8.0.0"
+
+  # Emotional state dimensions (all configurable)
+  dimensions:
+    confidence: 0.7
+    uncertainty: 0.2
+    curiosity: 0.5
+    urgency: 0.2
+    engagement: 0.6
+    satisfaction: 0.5
+    frustration: 0.0
+    focus: 0.6
+    cognitive_load: 0.3
+    stress: 0.0
+    recovery: 1.0
+
+  # Decay policy (applied per processing cycle)
+  decay:
+    interval_seconds: 5.0
+    # Per-dimension decay rates toward neutral
+    rates:
+      frustration: 0.05
+      urgency: 0.03
+      stress: 0.04
+      curiosity: 0.02
+      engagement: 0.01
+      satisfaction: 0.01
+    # Neutral targets per dimension
+    neutral:
+      confidence: 0.7
+      uncertainty: 0.2
+      curiosity: 0.5
+      urgency: 0.2
+      engagement: 0.6
+      satisfaction: 0.5
+      frustration: 0.0
+      focus: 0.6
+      cognitive_load: 0.3
+      stress: 0.0
+      recovery: 1.0
+
+  # Transition thresholds
+  transitions:
+    stress_alert_threshold: 0.70
+    frustration_alert_threshold: 0.65
+    cognitive_overload_threshold: 0.80
+    low_confidence_threshold: 0.40
+    high_engagement_threshold: 0.80
+    recovery_threshold: 0.30
+    # Smoothing factor for state updates (0=instant, 1=no change)
+    smoothing_factor: 0.25
+
+  # Signal detection weights
+  signals:
+    execution_failure_weight: 0.15
+    timeout_weight: 0.12
+    reasoning_low_confidence_weight: 0.10
+    planning_risk_weight: 0.08
+    learning_failure_weight: 0.10
+    user_feedback_positive_weight: 0.12
+    user_feedback_negative_weight: 0.15
+    system_health_degraded_weight: 0.10
+    consecutive_failure_multiplier: 1.5
+    max_signal_impact: 0.40
+
+  # History and persistence
+  history:
+    max_state_history: 2000
+    max_transition_history: 1000
+    max_audit_trail: 5000
+    max_session_history: 500
+    persist_on_shutdown: true
+
+  # Confidence influence on other agents
+  confidence_influence:
+    enabled: true
+    low_confidence_penalty: 0.10
+    high_stress_penalty: 0.08
+    high_engagement_bonus: 0.05
+    min_influence: -0.20
+    max_influence: 0.10
+
+  # Timeouts
+  timeouts:
+    analysis_timeout_seconds: 5.0
+    regulation_timeout_seconds: 3.0
+
+  # Observability
+  logging:
+    level: "INFO"
+    log_state_details: false
+    emit_broker_events: true
+
+motivation:
+  version: "8.0.0"
+
+  # Goal motivation defaults
+  goals:
+    max_goals_per_user: 50
+    max_total_goals: 500
+    default_difficulty: 0.5
+    default_priority: 2
+    stagnation_threshold_hours: 24
+    burnout_check_window: 10
+    burnout_failure_rate_threshold: 0.70
+
+  # Motivation scoring
+  scoring:
+    base_motivation: 0.60
+    progress_weight: 0.30
+    difficulty_weight: 0.20
+    recency_weight: 0.15
+    streak_bonus_per_day: 0.03
+    max_streak_bonus: 0.20
+    failure_penalty: 0.08
+    recovery_bonus: 0.05
+
+  # Recommendation thresholds
+  recommendations:
+    min_confidence: 0.50
+    max_recommendations_per_session: 5
+    burnout_recommendation_threshold: 0.70
+    stagnation_recommendation_threshold: 0.60
+    low_motivation_threshold: 0.35
+    high_motivation_threshold: 0.80
+
+  # Adaptation
+  adaptation:
+    learning_rate: 0.05
+    max_adaptation_history: 1000
+    effectiveness_window: 20
+
+  # History
+  history:
+    max_motivation_history: 2000
+    max_audit_trail: 3000
+
+  # Persistence
+  persistence:
+    enabled: true
+    path: "data/motivation_state.json"
+
+  # Background maintenance
+  maintenance:
+    interval_seconds: 300.0
+
+  # Timeouts
+  timeouts:
+    recommendation_timeout_seconds: 5.0
+
+  # Broker event emission
+  broker_events:
+    emit_emotion_updates: true
+    emit_motivation_updates: true
+    emit_confidence_influence: true
+    min_influence_to_emit: 0.02

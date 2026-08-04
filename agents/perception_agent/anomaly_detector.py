@@ -10,12 +10,12 @@ from sklearn.preprocessing import StandardScaler
 @dataclass
 class AnomalyConfig:
     """Configuration for anomaly detection."""
-    contamination: float
-    n_estimators: int
-    max_samples: int
-    confidence_threshold: float
-    temporal_window: int
-    feature_dim: int
+    contamination: float = 0.1
+    n_estimators: int = 100
+    max_samples: int = 256
+    confidence_threshold: float = 0.7
+    temporal_window: int = 10
+    feature_dim: int = 64
 
 class AnomalyDetector:
     def __init__(self, config: Dict[str, Any]):

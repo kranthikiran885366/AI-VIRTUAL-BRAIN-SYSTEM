@@ -3,7 +3,7 @@ AgentIntegration — Production implementation.
 
 Bug fixes vs original:
   - Constructor accepts config: Dict (not config_path: str)
-  - asyncio.get_event_loop().time() replaced with time.monotonic() (Python 3.10+ safe)
+  - Event timestamps use time.monotonic() (Python 3.10+ safe)
   - All HTTP calls wrapped in retry logic (3 attempts, exponential backoff)
   - Session created lazily (not in initialize()) to support sync contexts
   - get_agent_health() uses asyncio.gather() for parallel health checks

@@ -13,10 +13,10 @@ from prometheus_client import make_asgi_app
 from structlog import get_logger
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from routes import router as api_router
-from auth import get_current_user
-from schemas import User, SystemStatus
-from config import Settings
+from .routes import router as api_router
+from .auth import get_current_user
+from .schemas import User, SystemStatus
+from .config import Settings
 
 # Configure logging
 logging.basicConfig(

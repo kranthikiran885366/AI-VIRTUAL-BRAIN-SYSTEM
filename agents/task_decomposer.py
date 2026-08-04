@@ -18,15 +18,26 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, Set
 from enum import Enum
 
-from planning_models import (
-    DecomposedTask,
-    TaskDependency,
-    HierarchicalTaskNetwork,
-    TaskType,
-    TaskStatus,
-    DependencyType,
-    GoalConstraint,
-)
+try:
+    from agents.planning_models import (
+        DecomposedTask,
+        TaskDependency,
+        HierarchicalTaskNetwork,
+        TaskType,
+        TaskStatus,
+        DependencyType,
+        GoalConstraint,
+    )
+except ImportError:
+    from planning_models import (  # type: ignore[no-redef]
+        DecomposedTask,
+        TaskDependency,
+        HierarchicalTaskNetwork,
+        TaskType,
+        TaskStatus,
+        DependencyType,
+        GoalConstraint,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -561,3 +572,52 @@ class TaskDecomposer:
             "parallel_task_limit": self.parallel_task_limit,
             "strategies": [s.value for s in DecompositionStrategy],
         }
+
+    # ── Sync compatibility wrappers (test API) ────────────────────────────
+
+    def decompose_goal(self, goal: Any, strategy: Any = None) -> List[Any]:
+        """Sync: decompose a goal-like object into a list of task dicts."""
+        import asyncio
+        goal_str = getattr(goal, 'title', '') or getattr(goal, 'goal_title', '') or str(goal)
+        desc = getattr(goal, 'description', '') or getattr(goal, 'goal_description', '')
+        strat = strategy or DecompositionStrategy.GOAL_DECOMPOSITION
+        if isinstance(strat, str):
+            strat = DecompositionStrategy(strat)
+        htn, _ = asyncio.get_event_loop().run_until_complete(
+            self._decompose_goal_async(goal_str, desc, strategy=strat)
+        )
+        return list(htn.all_tasks.values())
+
+    async def _decompose_goal_async(self, goal, goal_description="", constraints=None,
+                                    timeframe=None,
+                                    strategy=DecompositionStrategy.GOAL_DECOMPOSITION):
+        """Internal async decompose (avoids sync wrapper recursion)."""
+        constraints = constraints or []
+        selected = await self._select_strategy(goal, strategy, constraints)
+        return await self._decompose_with_strategy(goal, goal_description, constraints,
+                                                    timeframe, selected), []
+
+    def generate_alternative_plans(self, goal: Any, num_alternatives: int = 3) -> List[Any]:
+        """Sync: generate alternative plans."""
+        import asyncio
+        goal_str = getattr(goal, 'title', '') or str(goal)
+        desc = getattr(goal, 'description', '')
+        alts = asyncio.get_event_loop().run_until_complete(
+            self._generate_alternatives_async(goal_str, desc, [], num_alternatives)
+        )
+        return alts
+
+    async def _generate_alternatives_async(self, goal, goal_description, constraints,
+                                            max_alternatives=3):
+        """Internal async alternative plan generator."""
+        return await TaskDecomposer.generate_alternative_plans(
+            self, goal, goal_description, constraints, max_alternatives
+        )
+
+    def score_plan(self, plan: Any) -> float:
+        """Sync: score a plan."""
+        tasks = getattr(plan, 'tasks', [])
+        if not tasks:
+            return 1.0
+        score = max(0.0, 1.0 - len(tasks) / 20.0)
+        return round(score, 3)

@@ -57,7 +57,9 @@ class ObjectDetector:
             
         except Exception as e:
             self.logger.error(f"Failed to load model: {str(e)}")
-            raise
+            # Graceful fallback — agent runs without object detection
+            self.net = None
+            self.classes = []
 
     async def detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """Detect objects in the frame."""

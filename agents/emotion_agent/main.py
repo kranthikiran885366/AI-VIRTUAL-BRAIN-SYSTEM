@@ -40,14 +40,24 @@ try:
     from agents.emotion_agent.emotion_store import EmotionStore
     from agents.emotion_agent.emotion_analyzer import EmotionAnalyzer
     from agents.emotion_agent.emotion_automation import EmotionAutomation
+    from agents.emotion_agent.emotion_engine import EmotionEngine, EmotionSignal
+    from agents.emotion_agent.emotion_context import EmotionContext
+    from agents.emotion_agent.recommendation_engine import RecommendationEngine
+    from agents.emotion_agent.motivation_engine import MotivationEngine
 except ImportError:
     try:
         from .emotion_processor import EmotionProcessor
         from .emotion_store import EmotionStore
         from .emotion_analyzer import EmotionAnalyzer
         from .emotion_automation import EmotionAutomation
+        from .emotion_engine import EmotionEngine, EmotionSignal
+        from .emotion_context import EmotionContext
+        from .recommendation_engine import RecommendationEngine
+        from .motivation_engine import MotivationEngine
     except ImportError:
         EmotionProcessor = EmotionStore = EmotionAnalyzer = EmotionAutomation = None
+        EmotionEngine = EmotionSignal = EmotionContext = RecommendationEngine = None
+        MotivationEngine = None
 
 logger = get_logger()
 
@@ -87,6 +97,12 @@ class EmotionAgent(BaseAgent):
         self.store = EmotionStore() if EmotionStore else None
         self.analyzer = EmotionAnalyzer() if EmotionAnalyzer else None
         self.automation = EmotionAutomation() if EmotionAutomation else None
+        # Phase 8: production engine + recommendation engine + motivation engine
+        self.engine: Optional["EmotionEngine"] = EmotionEngine() if EmotionEngine else None
+        self.rec_engine: Optional["RecommendationEngine"] = RecommendationEngine() if RecommendationEngine else None
+        self.motivation_engine: Optional["MotivationEngine"] = MotivationEngine() if MotivationEngine else None
+        # Broker event config (loaded lazily from engine config)
+        self._broker_events_cfg: Dict[str, Any] = {}
 
         if FastAPI:
             self.app = FastAPI(title="Emotion Agent API")
@@ -202,18 +218,28 @@ class EmotionAgent(BaseAgent):
             await self.analyzer.initialize()
         if self.automation:
             await self.automation.initialize()
+        if self.engine:
+            await self.engine.start()
+            # Load broker event config from engine config
+            self._broker_events_cfg = self.engine._cfg.get("broker_events", {})
+        if self.motivation_engine:
+            await self.motivation_engine.start()
         logger.info("Emotion Agent initialized")
 
     async def shutdown(self):
-        await super().shutdown()
-        if self.processor:
-            await self.processor.shutdown()
-        if self.store:
-            await self.store.shutdown()
-        if self.analyzer:
-            await self.analyzer.shutdown()
+        if self.motivation_engine:
+            await self.motivation_engine.stop()
+        if self.engine:
+            await self.engine.stop()
         if self.automation:
             await self.automation.shutdown()
+        if self.analyzer:
+            await self.analyzer.shutdown()
+        if self.store:
+            await self.store.shutdown()
+        if self.processor:
+            await self.processor.shutdown()
+        await super().shutdown()
         logger.info("Emotion Agent shut down")
 
     async def _update_state(self):
@@ -276,9 +302,151 @@ class EmotionAgent(BaseAgent):
             current = await self.processor.get_current_emotions()
             return {"status": "ok", "emotions": current}
 
+        # Phase 8: engine state
+        if action == "get_state" and self.engine:
+            return {"status": "ok", "state": self.engine.get_state(),
+                    "dimensions": self.engine.get_dimensions()}
+
+        if action == "get_engine_metrics" and self.engine:
+            return {"status": "ok", "metrics": self.engine.get_metrics()}
+
+        if action == "get_analytics" and self.engine:
+            return {"status": "ok", "analytics": self.engine.get_analytics()}
+
+        if action == "process_signal" and self.engine and EmotionSignal:
+            sig_data = input_data.get("signal", input_data)
+            validation = self.engine.validate_signal(sig_data)
+            if not validation["valid"]:
+                return {"status": "error", "errors": validation["errors"]}
+            signal = EmotionSignal(
+                source=sig_data.get("source", "unknown"),
+                signal_type=sig_data.get("signal_type", "unknown"),
+                intensity=float(sig_data.get("intensity", 0.5)),
+                context=sig_data.get("context", {}),
+                correlation_id=task.get("correlation_id"),
+                trace_id=task.get("trace_id"),
+            )
+            result = await self.engine.process_signal(signal)
+            return {"status": "ok", **result}
+
+        if action == "get_recommendations" and self.engine and self.rec_engine:
+            motivation_score = float(input_data.get("motivation_score", 0.6))
+            recs = self.rec_engine.generate(
+                emotional_state=self.engine.get_dimensions(),
+                motivation_score=motivation_score,
+                context=input_data.get("context", {}),
+                correlation_id=task.get("correlation_id"),
+                trace_id=task.get("trace_id"),
+            )
+            return {"status": "ok", "recommendations": [r.to_dict() for r in recs],
+                    "count": len(recs)}
+
+        if action == "begin_session" and self.engine:
+            session = self.engine.begin_session(
+                request_id=input_data.get("request_id"),
+                correlation_id=input_data.get("correlation_id"),
+                trace_id=input_data.get("trace_id"),
+            )
+            return {"status": "ok", "session": session.to_dict()}
+
+        if action == "end_session" and self.engine:
+            result = self.engine.end_session()
+            return {"status": "ok", "session": result}
+
+        if action == "get_audit_trail" and self.engine:
+            limit = int(input_data.get("limit", 100))
+            return {"status": "ok", "audit_trail": self.engine.get_audit_trail(limit)}
+
+        if action == "get_confidence_influence" and self.engine:
+            return {"status": "ok",
+                    "confidence_influence": self.engine.get_confidence_influence()}
+
         # Default: analyze whatever text is present
         result = self._analyze_text(text)
+        # Phase 8: also feed text analysis into engine as a signal
+        if self.engine and EmotionSignal and result.get("primary_emotion") != "neutral":
+            signal_type = result.get("signal_type", "user_feedback_positive")
+            signal = EmotionSignal(
+                source="conversation_text",
+                signal_type=signal_type,
+                intensity=float(result.get("confidence", 0.5)),
+                context={"primary_emotion": result.get("primary_emotion"),
+                         "sentiment": result.get("sentiment")},
+                correlation_id=task.get("correlation_id"),
+                trace_id=task.get("trace_id"),
+            )
+            try:
+                sig_result = await self.engine.process_signal(signal)
+                await self._emit_broker_emotion_update(
+                    sig_result, task.get("correlation_id"), task.get("trace_id")
+                )
+            except Exception:
+                pass
         return {"status": "analyzed", **result}
+
+    # ─── Broker Integration ───────────────────────────────────────────────────
+
+    async def _emit_broker_emotion_update(
+        self,
+        signal_result: Dict[str, Any],
+        correlation_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+    ) -> None:
+        """
+        Emit EMOTION_UPDATE and STATE_UPDATE broker messages so other agents
+        (Decision, Reasoning, Planning, Learning) can react to emotional context.
+        Only emits via the existing broker — no direct agent-to-agent calls.
+        """
+        if not self._message_broker:
+            return
+        cfg = self._broker_events_cfg
+        if not cfg.get("emit_emotion_updates", True):
+            return
+
+        try:
+            from orchestrator.agent_communication import MessageType, MessagePriority
+
+            state = signal_result.get("state", {})
+            confidence_influence = signal_result.get("confidence_influence", 0.0)
+            min_influence = float(cfg.get("min_influence_to_emit", 0.02))
+
+            # Emit EMOTION_UPDATE to all subscribers
+            await self._message_broker.send_message(
+                sender_agent_id=self.agent_id,
+                recipient_agent_id=None,  # broadcast
+                message_type=MessageType.EMOTION_UPDATE,
+                content={
+                    "emotion_state": state,
+                    "dimensions": self.engine.get_dimensions() if self.engine else {},
+                    "transitions": signal_result.get("transitions", []),
+                    "signal_id": signal_result.get("signal_id"),
+                    "source": "emotion_engine",
+                },
+                priority=MessagePriority.NORMAL,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+            )
+
+            # Emit STATE_UPDATE with confidence influence if significant
+            if cfg.get("emit_confidence_influence", True) and abs(confidence_influence) >= min_influence:
+                await self._message_broker.send_message(
+                    sender_agent_id=self.agent_id,
+                    recipient_agent_id=None,  # broadcast
+                    message_type=MessageType.STATE_UPDATE,
+                    content={
+                        "type": "confidence_influence",
+                        "confidence_influence": confidence_influence,
+                        "is_stressed": state.get("is_stressed", False),
+                        "is_overloaded": state.get("is_overloaded", False),
+                        "is_low_confidence": state.get("is_low_confidence", False),
+                        "source": "emotion_engine",
+                    },
+                    priority=MessagePriority.NORMAL,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
+                )
+        except Exception as exc:
+            logger.debug("emotion_agent.broker_emit_failed error=%s", exc)
 
 
 # ─── Standalone FastAPI app ───────────────────────────────────────────────────

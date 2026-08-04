@@ -1,68 +1,74 @@
-# Social Agent Configuration
+# Social Intelligence Engine — Phase 13 Configuration
 
-# Storage settings
 storage_path: "data/relationships.json"
-max_interaction_history: 100
+max_interaction_history: 200
 
-# Emotion detection settings
-emotion_detection:
-  positive_threshold: 0.6
-  negative_threshold: 0.4
-  neutral_threshold: 0.5
-
-# Trust score settings
-trust_score:
+trust:
   initial_value: 0.5
   min_value: 0.0
   max_value: 1.0
-  decay_rate: 0.01  # Trust score decay per day of inactivity
+  decay_rate_per_day: 0.01
+  positive_delta: 0.08
+  negative_delta: 0.10
+  formal_delta: 0.04
+  informal_delta: 0.03
+  trusted_threshold: 0.70
+  distrustful_threshold: 0.30
+  new_interaction_count: 3
 
-# Relationship status thresholds
-relationship_status:
-  new_threshold: 3  # Number of interactions before moving from "new"
-  trusted_threshold: 0.7  # Trust score needed for "trusted" status
-  distrustful_threshold: 0.3  # Trust score below which status becomes "distrustful"
+rapport:
+  initial_value: 0.5
+  positive_delta: 0.06
+  negative_delta: 0.08
+  decay_rate_per_day: 0.005
 
-# Formality settings
-formality:
-  default_level: "neutral"
-  adjustment_rate: 0.1  # How quickly formality preferences adapt
+social_confidence:
+  base: 0.5
+  trust_weight: 0.4
+  interaction_weight: 0.01
+  max_interaction_bonus: 0.3
 
-# Response generation
-response_generation:
-  max_response_length: 500
-  min_response_length: 10
-  default_emotional_tone: "neutral"
-  context_window: 5  # Number of previous interactions to consider
+session:
+  max_active_sessions: 500
+  session_ttl_seconds: 3600
+  context_window: 10
 
-# Logging settings
-logging:
-  level: "INFO"
-  file: "logs/social_agent.log"
-  max_file_size: 10485760  # 10MB
-  backup_count: 5
+collaboration:
+  max_parallel_agents: 10
+  task_timeout_seconds: 30.0
+  delegation_timeout_seconds: 20.0
+  max_retries: 2
+  queue_size: 200
 
-# Performance settings
+consensus:
+  default_policy: "confidence_weighted"   # majority | weighted | confidence_weighted | expert_preference
+  min_votes: 1
+  quorum_ratio: 0.5
+  fallback_policy: "majority"
+  history_limit: 500
+
+negotiation:
+  max_rounds: 5
+  timeout_seconds: 15.0
+  concession_rate: 0.1
+  agreement_threshold: 0.6
+  history_limit: 500
+
+conflict_resolution:
+  strategy: "confidence_priority"         # confidence_priority | ethics_first | recency | majority
+  ethics_agent: "ethics_agent"
+  history_limit: 200
+
+observability:
+  audit_trail_limit: 1000
+  metrics_window_seconds: 300
+
 performance:
   cache_size: 1000
-  cleanup_interval: 3600  # seconds
-  max_concurrent_requests: 10
+  cleanup_interval_seconds: 3600
+  max_concurrent_requests: 50
 
-# Integration settings
-integrations:
-  language_model:
-    provider: "openai"
-    model: "gpt-4"
-    temperature: 0.7
-    max_tokens: 150
-
-  emotion_analysis:
-    provider: "azure"
-    confidence_threshold: 0.8
-
-# Security settings
 security:
-  max_requests_per_minute: 60
-  allowed_origins: ["*"]
-  require_authentication: true
-  token_expiry: 3600  # seconds 
+  max_requests_per_minute: 120
+  validate_agent_requests: true
+  max_payload_bytes: 65536

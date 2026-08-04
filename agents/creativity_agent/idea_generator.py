@@ -1,22 +1,21 @@
 """
-IdeaGenerator — Production implementation.
+IdeaGenerator — Phase 10 Production Implementation.
 
-Generates concepts, approaches, and implementation plans via:
-  1. A local language model (GPT-2 via HuggingFace) when available.
-  2. A dynamic keyword-driven template synthesizer when the model is unavailable.
-     All fallback output is built from real context fields — no static strings.
+Generates concepts, technical approaches, and implementation plans:
+  1. Integrates all 11 structured ideation strategies (brainstorming, SCAMPER, lateral,
+     analogical, concept blending, mind mapping, reverse, first-principles, constraint-driven,
+     goal-driven, multi-path).
+  2. Synthesizes multi-agent creative contexts (conversation, memory, decision, reasoning,
+     planning, learning, emotion, language).
+  3. Uses local LLM (GPT-2) when available or dynamic context synthesizer when unavailable.
+  4. Enforces configurable constraint thresholds and bounded search spaces.
 """
+from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
-
-try:
-    import numpy as np
-    _HAS_NUMPY = True
-except ImportError:
-    _HAS_NUMPY = False
 
 try:
     from transformers import GPT2LMHeadModel, GPT2Tokenizer
@@ -26,9 +25,12 @@ except ImportError:
     GPT2LMHeadModel = None
     GPT2Tokenizer = None
 
+from .divergent import DivergentThinking
+from .models import CreativeIdea
+
 
 class IdeaGenerator:
-    """Generates creative ideas from context, patterns, and inspiration data."""
+    """Generates creative ideas across all ideation strategies."""
 
     def __init__(self, config: Dict[str, Any]):
         self.logger = logging.getLogger(__name__)
@@ -39,18 +41,20 @@ class IdeaGenerator:
         model_cfg = config.get("models", {}).get("idea_generation", {})
         self._model_name = model_cfg.get("model", "gpt2")
         self._temperature = float(model_cfg.get("temperature", 0.8))
-        self._max_tokens = int(model_cfg.get("max_tokens", 200))
 
         self.model: Optional[Any] = self._initialize_model()
         self.tokenizer: Optional[Any] = self._initialize_tokenizer()
 
-        # Constraint thresholds (read from config, not hardcoded)
-        _constraints = config.get("idea_generation", {}).get("constraints", {})
-        self._min_originality = float(_constraints.get("min_originality", 0.5))
-        self._min_feasibility = float(_constraints.get("min_feasibility", 0.4))
-        self._min_impact = float(_constraints.get("min_impact", 0.35))
+        # Divergent thinking engine reference
+        self.divergent_engine = DivergentThinking(config)
 
-        # Dynamic verb/adjective pools for fallback generation
+        # Constraint thresholds
+        _constraints = config.get("idea_generation", {}).get("constraints", {})
+        self._min_originality = float(_constraints.get("min_originality", 0.4))
+        self._min_feasibility = float(_constraints.get("min_feasibility", 0.35))
+        self._min_impact = float(_constraints.get("min_impact", 0.30))
+
+        # Dynamic verb/adjective pools
         self._action_verbs = [
             "automate", "streamline", "decentralize", "personalize", "amplify",
             "integrate", "optimize", "gamify", "democratize", "federate",
@@ -60,80 +64,148 @@ class IdeaGenerator:
             "adaptive", "zero-trust", "event-driven", "privacy-preserving",
         ]
 
-    # ─── Model Initialization ────────────────────────────────────────────────
-
     def _initialize_model(self) -> Optional[Any]:
         if not _HAS_TRANSFORMERS:
             return None
+        model_cfg = self.config.get("models", {}).get("idea_generation", {})
+        if not model_cfg.get("use_transformer", False):
+            return None
         try:
-            return GPT2LMHeadModel.from_pretrained(self._model_name)
+            return GPT2LMHeadModel.from_pretrained(self._model_name, local_files_only=True)
         except Exception as e:
-            self.logger.warning(f"IdeaGenerator: model load failed ({self._model_name}): {e}")
+            self.logger.warning(f"IdeaGenerator model load skipped: {e}")
             return None
 
     def _initialize_tokenizer(self) -> Optional[Any]:
         if not _HAS_TRANSFORMERS:
             return None
+        model_cfg = self.config.get("models", {}).get("idea_generation", {})
+        if not model_cfg.get("use_transformer", False):
+            return None
         try:
-            tok = GPT2Tokenizer.from_pretrained(self._model_name)
-            # GPT-2 has no pad token by default — set it to eos
+            tok = GPT2Tokenizer.from_pretrained(self._model_name, local_files_only=True)
             if tok.pad_token is None:
                 tok.pad_token = tok.eos_token
             return tok
         except Exception as e:
-            self.logger.warning(f"IdeaGenerator: tokenizer load failed: {e}")
+            self.logger.warning(f"IdeaGenerator tokenizer load skipped: {e}")
             return None
 
-    # ─── Main Generation Pipeline ────────────────────────────────────────────
+    # ── Main Generation Entry Point ───────────────────────────────────────────
 
-    def generate(self, context: Dict[str, Any],
-                 patterns: Dict[str, Any],
-                 inspiration: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Generate `num_ideas` creative ideas from context, patterns, and inspiration."""
+    def generate(
+        self,
+        context: Dict[str, Any],
+        patterns: Dict[str, Any],
+        inspiration: Dict[str, Any],
+        strategy: str = "auto",
+    ) -> List[Dict[str, Any]]:
+        """Generate creative ideas given multi-agent context, patterns, and inspiration."""
         try:
             combined = self._combine_contexts(context, patterns, inspiration)
-            num_ideas = int(self.config.get("num_ideas_to_generate", 5))
-            ideas = []
-            for _ in range(num_ideas):
-                idea = self._generate_single_idea(combined, context)
-                if idea and self._validate_idea(idea):
-                    ideas.append(idea)
+            domain = combined.get("domain", "general")
+            goals = combined.get("goals", [])
+            constraints = combined.get("constraints", [])
+
+            strat = (strategy or "auto").lower()
+            ideas: List[Dict[str, Any]] = []
+
+            # Dispatch to specific strategy if requested
+            if strat == "brainstorming":
+                raw_ideas = self.divergent_engine.generate_brainstorm(domain, goals, constraints)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "scamper":
+                raw_ideas = self.divergent_engine.generate_scamper(domain, goals, constraints)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "lateral":
+                raw_ideas = self.divergent_engine.generate_lateral(domain, goals, constraints)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "analogical":
+                raw_ideas = self.divergent_engine.generate_analogical(domain, goals)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "concept_blending":
+                raw_ideas = self.divergent_engine.generate_concept_blend(domain, goals)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "mind_mapping":
+                raw_ideas = self.divergent_engine.generate_mind_map(domain, goals)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "reverse":
+                raw_ideas = self.divergent_engine.generate_reverse(domain, goals)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "first_principles":
+                raw_ideas = self.divergent_engine.generate_first_principles(domain, goals)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "constraint_driven":
+                raw_ideas = self.divergent_engine.generate_constraint_driven(domain, constraints)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "goal_driven":
+                raw_ideas = self.divergent_engine.generate_goal_driven(domain, goals)
+                ideas = [i.to_dict() for i in raw_ideas]
+            elif strat == "multi_path":
+                raw_ideas = self.divergent_engine.generate_multi_path(domain, goals, constraints)
+                ideas = [i.to_dict() for i in raw_ideas]
+            else:
+                # Default auto pipeline: generate single ideas iteratively + SCAMPER fallback
+                num_ideas = int(self.config.get("num_ideas_to_generate", 5))
+                for _ in range(num_ideas):
+                    single = self._generate_single_idea(combined, context)
+                    if single:
+                        ideas.append(single)
+                if not ideas:
+                    raw_ideas = self.divergent_engine.generate_scamper(domain, goals, constraints)
+                    ideas = [i.to_dict() for i in raw_ideas]
+
+            # Populate score metadata if missing
+            for idea in ideas:
+                if "metadata" not in idea:
+                    idea["metadata"] = {}
+                meta = idea["metadata"]
+                if "originality_score" not in meta:
+                    meta["originality_score"] = self._calculate_originality(
+                        idea.get("concept", ""), idea.get("approach", "")
+                    )
+                if "feasibility_score" not in meta:
+                    meta["feasibility_score"] = self._calculate_feasibility(
+                        idea.get("implementation", "")
+                    )
+                if "impact_score" not in meta:
+                    meta["impact_score"] = self._calculate_impact(
+                        idea.get("concept", ""), idea.get("approach", "")
+                    )
+
             self._update_idea_history(ideas)
             return ideas
         except Exception as e:
             self.logger.error(f"IdeaGenerator.generate failed: {e}")
             return []
 
-    def _generate_single_idea(self, combined: Dict[str, Any],
-                               original_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Generate one complete idea.
-        Critically: concept is generated first, then injected into combined context
-        before generating approach; approach is then injected before generating implementation.
-        This fixes the context-passing bug where approach/implementation prompts
-        had no knowledge of the concept just generated.
-        """
+    # ── Single Idea Generator ─────────────────────────────────────────────────
+
+    def _generate_single_idea(
+        self, combined: Dict[str, Any], original_context: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate a single idea by chaining concept -> approach -> implementation."""
         try:
             concept = self._generate_concept(combined)
             if not concept:
                 return None
 
-            # Inject generated concept before generating approach
-            combined_with_concept = {**combined, "concept": concept}
-            approach = self._generate_approach(combined_with_concept)
+            combined_concept = {**combined, "concept": concept}
+            approach = self._generate_approach(combined_concept)
             if not approach:
                 return None
 
-            # Inject both concept and approach before generating implementation
-            combined_with_approach = {**combined_with_concept, "approach": approach}
-            implementation = self._generate_implementation(combined_with_approach)
+            combined_approach = {**combined_concept, "approach": approach}
+            implementation = self._generate_implementation(combined_approach)
             if not implementation:
                 return None
 
-            idea: Dict[str, Any] = {
+            return {
                 "concept": concept,
                 "approach": approach,
                 "implementation": implementation,
+                "strategy": "default_pipeline",
+                "domain": original_context.get("domain", "general"),
                 "metadata": {
                     "timestamp": datetime.utcnow().isoformat(),
                     "context_domain": original_context.get("domain", ""),
@@ -144,37 +216,40 @@ class IdeaGenerator:
                     "impact_score": self._calculate_impact(concept, approach),
                 },
             }
-            return idea
         except Exception as e:
             self.logger.error(f"_generate_single_idea failed: {e}")
             return None
 
-    # ─── LLM Generation ──────────────────────────────────────────────────────
+    # ── LLM / Dynamic Concept Generation ──────────────────────────────────────
 
     def _generate_concept(self, context: Dict[str, Any]) -> Optional[str]:
         if self.model and self.tokenizer:
-            return self._generate_via_model(self._build_concept_prompt(context), max_new_tokens=100)
+            prompt = self._build_concept_prompt(context)
+            res = self._generate_via_model(prompt, max_new_tokens=100)
+            if res:
+                return res
         return self._dynamic_concept(context)
 
     def _generate_approach(self, context: Dict[str, Any]) -> Optional[str]:
         if self.model and self.tokenizer:
-            return self._generate_via_model(self._build_approach_prompt(context), max_new_tokens=150)
+            prompt = self._build_approach_prompt(context)
+            res = self._generate_via_model(prompt, max_new_tokens=150)
+            if res:
+                return res
         return self._dynamic_approach(context)
 
     def _generate_implementation(self, context: Dict[str, Any]) -> Optional[str]:
         if self.model and self.tokenizer:
-            return self._generate_via_model(self._build_implementation_prompt(context), max_new_tokens=200)
+            prompt = self._build_implementation_prompt(context)
+            res = self._generate_via_model(prompt, max_new_tokens=200)
+            if res:
+                return res
         return self._dynamic_implementation(context)
 
     def _generate_via_model(self, prompt: str, max_new_tokens: int = 150) -> Optional[str]:
-        """Run the language model and return cleaned output."""
         try:
             inputs = self.tokenizer(
-                prompt,
-                return_tensors="pt",
-                max_length=512,
-                truncation=True,
-                padding=True,
+                prompt, return_tensors="pt", max_length=512, truncation=True, padding=True
             )
             import torch
             with torch.no_grad():
@@ -188,7 +263,6 @@ class IdeaGenerator:
                     do_sample=True,
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
-            # Decode only the newly generated tokens (exclude the prompt)
             generated = outputs[0][inputs["input_ids"].shape[-1]:]
             text = self.tokenizer.decode(generated, skip_special_tokens=True).strip()
             return text if text else None
@@ -196,130 +270,63 @@ class IdeaGenerator:
             self.logger.warning(f"Model generation failed: {e}")
             return None
 
-    # ─── Prompt Builders ─────────────────────────────────────────────────────
+    # ── Prompt Builders ───────────────────────────────────────────────────────
 
     def _build_concept_prompt(self, context: Dict[str, Any]) -> str:
         domain = context.get("domain", "general")
         goals = ", ".join(str(g) for g in context.get("goals", []))
-        constraints = ", ".join(str(c) for c in context.get("constraints", []))
-        inspiration = ", ".join(str(i) for i in context.get("inspiration", [])[:3])
-        return (
-            f"Domain: {domain}\n"
-            f"Goals: {goals or 'none specified'}\n"
-            f"Constraints: {constraints or 'none'}\n"
-            f"Inspiration: {inspiration or 'general creativity'}\n"
-            f"Generate a novel, specific, and actionable concept:\n"
-        )
+        return f"Domain: {domain}\nGoals: {goals or 'none'}\nGenerate a novel, actionable concept:\n"
 
     def _build_approach_prompt(self, context: Dict[str, Any]) -> str:
         domain = context.get("domain", "general")
         concept = context.get("concept", "")
-        return (
-            f"Domain: {domain}\n"
-            f"Concept: {concept}\n"
-            f"Describe a practical technical approach to implement this concept. "
-            f"Consider feasibility, team size, and timeline:\n"
-        )
+        return f"Domain: {domain}\nConcept: {concept}\nDescribe a practical technical approach:\n"
 
     def _build_implementation_prompt(self, context: Dict[str, Any]) -> str:
+        domain = context.get("domain", "general")
         concept = context.get("concept", "")
         approach = context.get("approach", "")
-        domain = context.get("domain", "general")
-        return (
-            f"Domain: {domain}\n"
-            f"Concept: {concept}\n"
-            f"Approach: {approach}\n"
-            f"Write numbered implementation steps (Step 1 through Step 5) with specific actions:\n"
-        )
+        return f"Domain: {domain}\nConcept: {concept}\nApproach: {approach}\nWrite numbered implementation steps:\n"
 
-    # ─── Dynamic Fallback Generators (zero static strings) ───────────────────
+    # ── Dynamic Fallbacks ─────────────────────────────────────────────────────
 
     def _dynamic_concept(self, context: Dict[str, Any]) -> str:
-        """Build a concept dynamically from domain keywords and random paradigm selection."""
         domain = context.get("domain", "system")
         goals = context.get("goals", [])
-        inspiration_items = context.get("inspiration", [])
-
-        # Pick a verb and adjective from pools (deterministically based on domain hash)
         pool_idx = abs(hash(domain)) % len(self._action_verbs)
         adj_idx = abs(hash(domain + "adj")) % len(self._scope_adjectives)
         verb = self._action_verbs[pool_idx]
         adj = self._scope_adjectives[adj_idx]
 
-        # Extract the most meaningful noun from domain string
         words = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', domain)]
         core_noun = words[0] if words else domain
 
-        # Incorporate a goal if available
-        goal_fragment = ""
-        if goals:
-            goal_fragment = f" to achieve {str(goals[0])[:60]}"
-
-        # Incorporate inspiration if available
-        insp_fragment = ""
-        if inspiration_items:
-            insp_str = str(inspiration_items[0])[:50] if isinstance(inspiration_items[0], str) \
-                else str(inspiration_items[0].get("content", ""))[:50]
-            if insp_str:
-                insp_fragment = f" — inspired by {insp_str}"
-
-        return f"{adj.capitalize()} system to {verb} {core_noun} workflows{goal_fragment}{insp_fragment}"
+        goal_frag = f" to achieve {str(goals[0])[:50]}" if goals else ""
+        return f"{adj.capitalize()} system to {verb} {core_noun} workflows{goal_frag}"
 
     def _dynamic_approach(self, context: Dict[str, Any]) -> str:
-        """Build an approach description from domain, concept, and inspiration."""
         domain = context.get("domain", "system")
-        concept = context.get("concept", "the proposed concept")
-        patterns = context.get("patterns", [])
-
-        pattern_note = ""
-        if patterns:
-            pat_str = str(patterns[0])[:60] if isinstance(patterns[0], str) else ""
-            if pat_str:
-                pattern_note = f" Existing patterns ({pat_str}) inform the architecture."
-
+        concept = context.get("concept", "proposed solution")
         adj_idx = abs(hash(domain + "approach")) % len(self._scope_adjectives)
         adj = self._scope_adjectives[adj_idx]
 
         return (
             f"Implement '{concept}' using a {adj} architecture within the {domain} domain. "
-            f"Begin with a lightweight proof-of-concept to validate assumptions, then scale using "
-            f"modular components that can be independently deployed and monitored.{pattern_note}"
+            f"Start with a lightweight proof-of-concept to validate assumptions before scaling."
         )
 
     def _dynamic_implementation(self, context: Dict[str, Any]) -> str:
-        """Build an implementation plan from concept and approach."""
         concept = context.get("concept", "the solution")
-        approach = context.get("approach", "the chosen approach")
         domain = context.get("domain", "system")
-
         return (
-            f"Step 1: Define success metrics for '{concept}' — latency, accuracy, adoption rate, or cost reduction. "
-            f"Step 2: Architect the {domain} components following the principle: {approach[:80]}. "
-            f"Step 3: Build the core engine with unit-testable modules; deploy behind a feature flag. "
-            f"Step 4: Run a two-week closed beta with five real users; collect structured feedback. "
-            f"Step 5: Iterate on top three pain points from beta, then open to full rollout with observability dashboards."
+            f"Step 1: Define success metrics for '{concept}' in {domain}. "
+            f"Step 2: Architect core components with modular interfaces. "
+            f"Step 3: Build engine and deploy behind feature flag. "
+            f"Step 4: Run 2-week pilot with representative users. "
+            f"Step 5: Refine based on telemetry and open to full rollout."
         )
 
-    # ─── Prompt Text Cleaner ─────────────────────────────────────────────────
-
-    def _clean_generated_text(self, text: str) -> str:
-        """Normalise whitespace and strip any re-emitted prompt markers."""
-        text = " ".join(text.split())
-        # If the model re-emitted "Step 1:", "Concept:", etc. at the very start, strip the label
-        text = re.sub(r'^(Step \d+|Concept|Approach|Implementation)\s*:\s*', '', text, flags=re.IGNORECASE)
-        return text.strip()
-
-    # ─── Validation & Scoring ────────────────────────────────────────────────
-
-    def _validate_idea(self, idea: Dict[str, Any]) -> bool:
-        meta = idea.get("metadata", {})
-        if meta.get("originality_score", 0) < self._min_originality:
-            return False
-        if meta.get("feasibility_score", 0) < self._min_feasibility:
-            return False
-        if meta.get("impact_score", 0) < self._min_impact:
-            return False
-        return True
+    # ── Scoring & Validation ──────────────────────────────────────────────────
 
     def _calculate_originality(self, concept: str, approach: str) -> float:
         if not self.idea_history:
@@ -327,11 +334,11 @@ class IdeaGenerator:
         combined = set((concept + " " + approach).lower().split())
         max_sim = 0.0
         for hist in self.idea_history[-100:]:
-            hist_words = set((hist.get("concept", "") + " " + hist.get("approach", "")).lower().split())
-            if not hist_words:
+            h_words = set((hist.get("concept", "") + " " + hist.get("approach", "")).lower().split())
+            if not h_words:
                 continue
-            intersection = len(combined & hist_words)
-            union = len(combined | hist_words)
+            intersection = len(combined & h_words)
+            union = len(combined | h_words)
             sim = intersection / union if union > 0 else 0.0
             if sim > max_sim:
                 max_sim = sim
@@ -340,11 +347,9 @@ class IdeaGenerator:
     def _calculate_feasibility(self, implementation: str) -> float:
         if not implementation:
             return 0.4
-        words = implementation.split()
-        word_count = len(words)
-        # Reward numbered steps
+        words = len(implementation.split())
         step_count = len(re.findall(r'\bStep \d+', implementation, re.IGNORECASE))
-        base = min(0.75, 0.35 + word_count * 0.005)
+        base = min(0.75, 0.35 + words * 0.005)
         bonus = min(0.2, step_count * 0.04)
         return round(max(0.15, min(0.95, base + bonus)), 3)
 
@@ -352,33 +357,20 @@ class IdeaGenerator:
         high_impact = [
             "transform", "revolutionize", "improve", "enhance", "solve",
             "optimize", "automate", "scale", "innovate", "disrupt",
-            "reduce", "increase", "simplify", "accelerate", "empower",
         ]
         combined = (concept + " " + approach).lower()
         matches = sum(1 for w in high_impact if w in combined)
         return round(min(0.95, 0.45 + matches * 0.05), 3)
 
-    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
-        """Jaccard similarity between word sets — falls back gracefully if tokenizer absent."""
-        try:
-            if self.tokenizer and _HAS_TRANSFORMERS:
-                t1 = set(self.tokenizer.encode(text1, add_special_tokens=False))
-                t2 = set(self.tokenizer.encode(text2, add_special_tokens=False))
-            else:
-                t1 = set(text1.lower().split())
-                t2 = set(text2.lower().split())
-            union = t1 | t2
-            return len(t1 & t2) / len(union) if union else 0.0
-        except Exception:
-            return 0.0
+    # ── Multi-Agent Context Blending ──────────────────────────────────────────
 
-    # ─── Context Combination ─────────────────────────────────────────────────
-
-    def _combine_contexts(self, context: Dict[str, Any],
-                          patterns: Dict[str, Any],
-                          inspiration: Dict[str, Any]) -> Dict[str, Any]:
-        """Merge context, patterns, and inspiration into a single generation context."""
-        # Extract inspiration element contents for direct use in prompts
+    def _combine_contexts(
+        self,
+        context: Dict[str, Any],
+        patterns: Dict[str, Any],
+        inspiration: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Synthesize context data across all sub-agent contexts."""
         insp_elements: List[str] = []
         for group in inspiration.get("elements", []):
             for elem in group.get("elements", []):
@@ -386,22 +378,34 @@ class IdeaGenerator:
                 if content:
                     insp_elements.append(content)
 
-        # Extract pattern-detected themes as keyword lists
         themes: List[str] = []
         for theme in patterns.get("semantic", {}).get("themes", []):
             themes.extend(theme.get("terms", []))
 
+        # Extract goals and constraints across sub-agent contexts if available
+        goals = list(context.get("goals", []))
+        constraints = list(context.get("constraints", []))
+
+        mem_ctx = context.get("memory_context", {})
+        if isinstance(mem_ctx, dict) and "key_learnings" in mem_ctx:
+            goals.extend(mem_ctx.get("key_learnings", []))
+
+        emo_ctx = context.get("emotion_context", {})
+        if isinstance(emo_ctx, dict) and "perceived_emotion" in emo_ctx:
+            emo = emo_ctx.get("perceived_emotion")
+            if emo:
+                goals.append(f"address user emotional state: {emo}")
+
         return {
             "domain": context.get("domain", "general"),
-            "goals": context.get("goals", []),
-            "constraints": context.get("constraints", []),
+            "goals": list(dict.fromkeys(goals)),
+            "constraints": list(dict.fromkeys(constraints)),
             "previous_ideas": context.get("previous_ideas", []),
             "inspiration": insp_elements[:10],
-            "patterns": list(dict.fromkeys(themes))[:10],  # deduplicated
-            # concept and approach are injected dynamically during generation
+            "patterns": list(dict.fromkeys(themes))[:10],
         }
 
-    # ─── History Management ──────────────────────────────────────────────────
+    # ── History ──────────────────────────────────────────────────────────────
 
     def _update_idea_history(self, new_ideas: List[Dict[str, Any]]):
         self.idea_history.extend(new_ideas)

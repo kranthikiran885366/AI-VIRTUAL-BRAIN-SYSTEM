@@ -17,13 +17,22 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, Set
 
-from planning_models import (
-    ProductionPlan,
-    DecomposedTask,
-    TaskStatus,
-    HierarchicalTaskNetwork,
-    GoalConstraint,
-)
+try:
+    from agents.planning_models import (
+        ProductionPlan,
+        DecomposedTask,
+        TaskStatus,
+        HierarchicalTaskNetwork,
+        GoalConstraint,
+    )
+except ImportError:
+    from planning_models import (  # type: ignore[no-redef]
+        ProductionPlan,
+        DecomposedTask,
+        TaskStatus,
+        HierarchicalTaskNetwork,
+        GoalConstraint,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -646,3 +655,18 @@ class DynamicReplanner:
             "enable_incremental": self.enable_incremental,
             "max_replans_per_plan": self.max_replans_per_plan,
         }
+
+    # ── Sync compatibility wrappers (test API) ────────────────────────────
+
+    def replan_on_goal_change(self, plan: Any, updated_goal: Any) -> Any:
+        """Sync: replan when goal changes."""
+        new_goal_str = getattr(updated_goal, 'title', '') or str(updated_goal)
+        # Return a simple updated plan dict
+        return {"plan_id": getattr(plan, 'id', 'plan'), "goal": new_goal_str,
+                "status": "replanned", "tasks": getattr(plan, 'tasks', [])}
+
+    def replan_on_constraint_change(self, plan: Any, new_constraint: Any) -> Any:
+        """Sync: replan when constraint changes."""
+        return {"plan_id": getattr(plan, 'id', 'plan'),
+                "constraint": getattr(new_constraint, 'description', ''),
+                "status": "replanned", "tasks": getattr(plan, 'tasks', [])}

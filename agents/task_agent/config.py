@@ -12,6 +12,7 @@ class TaskAgentSettings:
     TASK_ANALYSIS_HISTORY_SIZE: int = int(os.environ.get("TASK_ANALYSIS_HISTORY_SIZE", 1000))
     TASK_AUTOMATION_HISTORY_SIZE: int = int(os.environ.get("TASK_AUTOMATION_HISTORY_SIZE", 1000))
     TASK_STORE_PATH: str = os.environ.get("TASK_STORE_PATH", "data/tasks")
+    TASK_AUTOMATION_RULES_PATH: str = os.environ.get("TASK_AUTOMATION_RULES_PATH", "data/tasks/automation_rules.json")
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
     MEMORY_AGENT_URL: str = os.environ.get("MEMORY_AGENT_URL", "http://localhost:8001")
     EMOTION_AGENT_URL: str = os.environ.get("EMOTION_AGENT_URL", "http://localhost:8001")

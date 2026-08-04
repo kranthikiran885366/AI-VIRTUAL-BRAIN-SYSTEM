@@ -19,6 +19,9 @@ import {
   Lightbulb,
   Activity,
   Settings2,
+  ChevronRight,
+  TrendingUp,
+  LayoutDashboard
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
@@ -38,7 +41,7 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
 // Agent icons mapping
 const AGENT_ICONS: Record<string, React.ReactNode> = {
-  orchestrator: <Brain className="h-4 w-4" />,
+  orchestrator_agent: <Brain className="h-4 w-4" />,
   memory_agent: <Database className="h-4 w-4" />,
   emotion_agent: <Heart className="h-4 w-4" />,
   task_agent: <Target className="h-4 w-4" />,
@@ -52,7 +55,7 @@ const AGENT_ICONS: Record<string, React.ReactNode> = {
 }
 
 const AGENT_COLORS: Record<string, string> = {
-  orchestrator: "#8B5CF6",
+  orchestrator_agent: "#8B5CF6",
   memory_agent: "#3B82F6",
   emotion_agent: "#EC4899",
   task_agent: "#14B8A6",
@@ -77,7 +80,7 @@ export function ChatInterface({
   onConversationCreated,
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [activeAgent, setActiveAgent] = useState("orchestrator")
+  const [activeAgent, setActiveAgent] = useState("orchestrator_agent")
   const [showBrainPanel, setShowBrainPanel] = useState(false)
   const [routingInfo, setRoutingInfo] = useState<{
     selectedAgent: string
@@ -209,104 +212,104 @@ export function ChatInterface({
   // Empty state
   if (messages.length === 0 && !isLoading) {
     return (
-      <div className="flex h-full flex-col">
-        <div className="flex-1 flex flex-col items-center justify-center p-8">
-          {/* Brain visualization header */}
-          <div className="relative mb-6">
-            <div className="h-24 w-24 rounded-full bg-primary/10 flex items-center justify-center">
-              <Brain className="h-12 w-12 text-primary brain-active" />
-            </div>
-            <div className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-green-500 flex items-center justify-center border-4 border-background">
-              <Activity className="h-4 w-4 text-white" />
-            </div>
-          </div>
-          
-          <h1 className="text-3xl font-bold mb-2 text-balance text-center gradient-text">
-            AI Virtual Brain System
-          </h1>
-          <p className="text-muted-foreground text-center max-w-md mb-2">
-            A cognitive AI with {brainStatus?.agents?.length || 28} specialized neural agents
-            working together through advanced orchestration.
-          </p>
-          
-          {/* System status */}
-          <div className="flex items-center gap-2 mb-8">
-            <Badge 
-              variant={brainStatus?.status === "operational" ? "default" : "secondary"}
-              className="gap-1"
-            >
-              <div className={cn(
-                "h-2 w-2 rounded-full",
-                brainStatus?.status === "operational" ? "bg-green-500 status-online" : "bg-muted-foreground"
-              )} />
-              {brainStatus?.status || "Connecting..."}
-            </Badge>
-            <span className="text-xs text-muted-foreground">
-              Python Backend Connected
-            </span>
-          </div>
-
-          {/* Capability cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-2xl w-full">
-            {[
-              { icon: Brain, label: "Reasoning", desc: "Complex problem solving", agent: "reasoning_agent" },
-              { icon: Database, label: "Memory", desc: "Long-term recall", agent: "memory_agent" },
-              { icon: Heart, label: "Emotion", desc: "Emotional intelligence", agent: "emotion_agent" },
-              { icon: Code, label: "Code", desc: "Programming help", agent: "language_agent" },
-              { icon: Sparkles, label: "Creative", desc: "Generate ideas", agent: "creativity_agent" },
-              { icon: Zap, label: "Tasks", desc: "Stay organized", agent: "task_agent" },
-            ].map(({ icon: Icon, label, desc, agent }) => (
-              <div
-                key={label}
-                className="flex items-start gap-3 p-4 rounded-xl bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer card-hover"
-                onClick={() => handleSend(`Help me with ${label.toLowerCase()}-related tasks`)}
-              >
-                <div 
-                  className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0"
-                  style={{ backgroundColor: `${AGENT_COLORS[agent] || AGENT_COLORS.orchestrator}20` }}
-                >
-                  <Icon 
-                    className="h-5 w-5" 
-                    style={{ color: AGENT_COLORS[agent] || AGENT_COLORS.orchestrator }}
-                  />
-                </div>
-                <div>
-                  <p className="font-medium text-sm">{label}</p>
-                  <p className="text-xs text-muted-foreground">{desc}</p>
-                </div>
+      <div className="flex h-full flex-col bg-background/40 backdrop-blur-md">
+        <ScrollArea className="flex-1">
+          <div className="flex flex-col items-center justify-center p-8 max-w-4xl mx-auto space-y-8 pt-16">
+            
+            {/* Brain visualization header */}
+            <div className="relative">
+              <div className="h-20 w-20 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20 shadow-lg shadow-primary/5">
+                <Brain className="h-10 w-10 text-primary brain-active" />
               </div>
-            ))}
-          </div>
+              <div className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-green-500 flex items-center justify-center border-4 border-background shadow-md">
+                <Activity className="h-3.5 w-3.5 text-white animate-pulse" />
+              </div>
+            </div>
+            
+            <div className="text-center space-y-2">
+              <h1 className="text-3xl font-extrabold tracking-tight gradient-text">
+                AI Virtual Brain System
+              </h1>
+              <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                A cognitive architecture powered by {brainStatus?.agents?.length || 28} specialized neural agents routing decisions collaboratively.
+              </p>
+            </div>
+            
+            {/* System status pill */}
+            <div className="flex items-center gap-2.5 bg-secondary/20 px-3.5 py-1.5 rounded-full border border-border/40 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              <span className="font-semibold capitalize text-foreground">{brainStatus?.status || "operational"}</span>
+              <span className="text-muted-foreground">|</span>
+              <span className="text-muted-foreground text-[10px] uppercase font-bold font-mono">Host Connect OK</span>
+            </div>
 
-          {/* Suggested prompts */}
-          <div className="mt-8 w-full max-w-2xl">
-            <p className="text-sm text-muted-foreground mb-3 text-center">
-              Try asking:
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {/* Capability cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
               {[
-                "Help me brainstorm ideas for a new project",
-                "Explain how neural networks work",
-                "Remember that I prefer concise answers",
-                "Help me plan my week productively",
-              ].map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => handleSend(prompt)}
-                  className="text-left p-3 rounded-lg border border-border hover:bg-secondary/50 text-sm transition-colors"
+                { icon: Brain, label: "Reasoning Agent", desc: "Logical decomposition & multi-step proof evaluation", agent: "reasoning_agent" },
+                { icon: Database, label: "Memory Agent", desc: "Syncs semantic knowledge indices & decays past interactions", agent: "memory_agent" },
+                { icon: Heart, label: "Emotion Agent", desc: "Tracks mood, expressions and sentiment alignment", agent: "emotion_agent" },
+                { icon: Code, label: "Language/Code Agent", desc: "Drafts code snippets, handles translation & stylistic revision", agent: "language_agent" },
+                { icon: Sparkles, label: "Creativity Agent", desc: "Generates divergent concepts &SCAMPER patterns", agent: "creativity_agent" },
+                { icon: Zap, label: "Task Operations", desc: "Manages priorities, Gantt timelines and alerts", agent: "task_agent" },
+              ].map(({ icon: Icon, label, desc, agent }) => (
+                <div
+                  key={label}
+                  className="flex items-start gap-4 p-5 rounded-2xl border border-border/50 bg-secondary/15 hover:bg-secondary/35 transition-all cursor-pointer card-hover"
+                  onClick={() => handleSend(`Coordinate ${label.toLowerCase()} to inspect resources`)}
                 >
-                  <MessageSquare className="h-4 w-4 inline mr-2 opacity-50" />
-                  {prompt}
-                </button>
+                  <div 
+                    className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 border shadow-inner"
+                    style={{ 
+                      backgroundColor: `${AGENT_COLORS[agent] || AGENT_COLORS.orchestrator_agent}15`,
+                      borderColor: `${AGENT_COLORS[agent] || AGENT_COLORS.orchestrator_agent}30` 
+                    }}
+                  >
+                    <Icon 
+                      className="h-5 w-5" 
+                      style={{ color: AGENT_COLORS[agent] || AGENT_COLORS.orchestrator_agent }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-foreground">{label}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{desc}</p>
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
 
-          {/* Mini brain network preview */}
-          <div className="mt-8 w-full max-w-md">
-            <BrainNetwork compact />
+            {/* Suggested prompts list */}
+            <div className="w-full space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground text-center">Suggested Operational Prompts</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {[
+                  "Draft a logical plan to study neural network structures",
+                  "Consolidate memory: I prefer programming using TypeScript",
+                  "Create high priority task: Complete AI Brain testing by Friday",
+                  "Brainstorm creative UI layouts for system monitoring",
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => handleSend(prompt)}
+                    className="text-left p-3.5 rounded-xl border border-border/50 bg-secondary/10 hover:bg-secondary/30 text-xs font-medium transition-all text-muted-foreground hover:text-foreground"
+                  >
+                    <MessageSquare className="h-3.5 w-3.5 inline mr-2 text-primary opacity-70" />
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Compact Brain preview graphics */}
+            <div className="w-full">
+              <BrainNetwork compact />
+            </div>
+
           </div>
-        </div>
+        </ScrollArea>
 
         <ChatInput onSend={handleSend} isLoading={isLoading} />
       </div>
@@ -314,31 +317,35 @@ export function ChatInterface({
   }
 
   return (
-    <div className="flex h-full">
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header with agent info */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+    <div className="flex h-full bg-background/40 backdrop-blur-md">
+      {/* Main chat viewport */}
+      <div className="flex-1 flex flex-col min-w-0">
+        
+        {/* Header with selected agent info */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border/40 bg-background/50 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-3">
             <div 
-              className="h-8 w-8 rounded-lg flex items-center justify-center"
-              style={{ backgroundColor: `${AGENT_COLORS[activeAgent] || AGENT_COLORS.orchestrator}20` }}
+              className="h-9 w-9 rounded-xl flex items-center justify-center border shadow-inner"
+              style={{ 
+                backgroundColor: `${AGENT_COLORS[activeAgent] || AGENT_COLORS.orchestrator_agent}15`,
+                borderColor: `${AGENT_COLORS[activeAgent] || AGENT_COLORS.orchestrator_agent}30`
+              }}
             >
-              {AGENT_ICONS[activeAgent] || <Brain className="h-4 w-4" />}
+              {AGENT_ICONS[activeAgent] || <Brain className="h-5 w-5" />}
             </div>
             <div>
-              <p className="font-medium text-sm capitalize">
+              <p className="font-bold text-sm capitalize text-foreground">
                 {activeAgent.replace("_agent", "").replace("_", " ")} Agent
               </p>
               {routingInfo && (
-                <p className="text-xs text-muted-foreground">
-                  Confidence: {(routingInfo.confidence * 100).toFixed(0)}%
+                <p className="text-[10px] text-muted-foreground font-mono">
+                  Confidence: <span className="font-semibold text-primary">{(routingInfo.confidence * 100).toFixed(0)}%</span> • Reasoning Matched
                 </p>
               )}
             </div>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {isLoading && <CognitiveLoop isProcessing compact />}
             <TooltipProvider>
               <Tooltip>
@@ -347,22 +354,20 @@ export function ChatInterface({
                     variant="ghost"
                     size="icon"
                     onClick={() => setShowBrainPanel(!showBrainPanel)}
-                    className={cn(showBrainPanel && "bg-secondary")}
+                    className={cn("h-8 w-8 rounded-lg", showBrainPanel && "bg-secondary")}
                   >
-                    <Settings2 className="h-4 w-4" />
+                    <Settings2 className="h-4.5 w-4.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {showBrainPanel ? "Hide" : "Show"} Brain Panel
-                </TooltipContent>
+                <TooltipContent>{showBrainPanel ? "Hide" : "Show"} Telemetry panel</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
         </div>
 
-        {/* Messages area */}
+        {/* Messages feed */}
         <ScrollArea className="flex-1" ref={scrollRef}>
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-3xl mx-auto py-6">
             {messages.map((message) => (
               <ChatMessage
                 key={message.id}
@@ -372,39 +377,59 @@ export function ChatInterface({
             ))}
             
             {isLoading && (
-              <div className="px-4 py-2">
-                <div className="flex items-center gap-2 mb-2">
-                  <div 
-                    className="h-6 w-6 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: `${AGENT_COLORS[activeAgent] || AGENT_COLORS.orchestrator}20` }}
-                  >
-                    {AGENT_ICONS[activeAgent] || <Brain className="h-3 w-3" />}
-                  </div>
-                  <span className="text-xs text-muted-foreground capitalize">
-                    {activeAgent.replace("_agent", "").replace("_", " ")} is thinking...
-                  </span>
+              <div className="px-6 py-6 border-b border-border/20 bg-secondary/10 flex items-start gap-4">
+                <div 
+                  className="h-8 w-8 rounded-xl flex items-center justify-center shrink-0 border"
+                  style={{ 
+                    backgroundColor: `${AGENT_COLORS[activeAgent] || AGENT_COLORS.orchestrator_agent}15`,
+                    borderColor: `${AGENT_COLORS[activeAgent] || AGENT_COLORS.orchestrator_agent}30`
+                  }}
+                >
+                  {AGENT_ICONS[activeAgent] || <Brain className="h-4 w-4" />}
                 </div>
-                <TypingIndicator agentName={activeAgent.replace("_agent", "")} />
+                <div className="flex-1 space-y-2">
+                  <span className="text-xs text-muted-foreground capitalize font-semibold font-mono">
+                    {activeAgent.replace("_agent", "").replace("_", " ")} processing...
+                  </span>
+                  <TypingIndicator agentName={activeAgent.replace("_agent", "")} />
+                </div>
               </div>
             )}
           </div>
         </ScrollArea>
 
-        {/* Input area */}
+        {/* Floating Input */}
         <ChatInput onSend={handleSend} isLoading={isLoading} />
       </div>
 
-      {/* Brain panel (collapsible) */}
+      {/* Right Telemetry panel (collapsible) */}
       {showBrainPanel && (
-        <div className="w-80 border-l border-border p-4 overflow-y-auto hidden lg:block">
-          <div className="space-y-4">
-            <CognitiveLoop isProcessing={isLoading} />
-            <BrainNetwork compact />
+        <div className="w-80 border-l border-border/40 p-5 overflow-y-auto hidden xl:block bg-secondary/5 glass-panel shrink-0">
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Cognitive States</h3>
+              <CognitiveLoop isProcessing={isLoading} />
+            </div>
+            
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Active Connections</h3>
+              <BrainNetwork compact />
+            </div>
+            
+            <Separator className="bg-border/30" />
+            
             <MemoriesPanel userId={userId} />
+            
+            <Separator className="bg-border/30" />
+            
             <TasksPanel userId={userId} />
           </div>
         </div>
       )}
     </div>
   )
+}
+
+function Separator({ className }: { className?: string }) {
+  return <div className={cn("h-px w-full bg-border", className)} />
 }

@@ -17,12 +17,20 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 
-from planning_models import (
-    ProductionPlan,
-    DecomposedTask,
-    TaskStatus,
-    ExecutionProgress,
-)
+try:
+    from agents.planning_models import (
+        ProductionPlan,
+        DecomposedTask,
+        TaskStatus,
+        ExecutionProgress,
+    )
+except ImportError:
+    from planning_models import (  # type: ignore[no-redef]
+        ProductionPlan,
+        DecomposedTask,
+        TaskStatus,
+        ExecutionProgress,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -502,3 +510,29 @@ class ExecutionMonitor:
             "plans_being_monitored": len([p for p in self.monitoring_active.values() if p]),
             "total_tracked_tasks": len(self.tracker.task_states),
         }
+
+    # ── Sync compatibility wrappers (test API) ────────────────────────────
+
+    def calculate_progress(self, plan: Any) -> Dict[str, Any]:
+        """Sync: calculate plan progress."""
+        tasks = getattr(plan, 'tasks', [])
+        total = len(tasks)
+        if total == 0:
+            return {"completion_percentage": 0.0, "total": 0, "completed": 0}
+        from planning_models import TaskStatus
+        completed = sum(1 for t in tasks
+                        if getattr(t, 'status', None) == TaskStatus.COMPLETED
+                        or getattr(t, 'status', '') == 'completed')
+        return {"completion_percentage": round(completed / total * 100, 1),
+                "total": total, "completed": completed}
+
+    def identify_critical_path(self, plan: Any) -> List[str]:
+        """Sync: identify critical path task IDs."""
+        tasks = getattr(plan, 'tasks', [])
+        if not tasks:
+            return []
+        # Simple: return tasks sorted by estimated_effort_hours descending
+        sorted_tasks = sorted(tasks,
+                              key=lambda t: getattr(t, 'estimated_effort_hours', 0),
+                              reverse=True)
+        return [getattr(t, 'id', '') for t in sorted_tasks]

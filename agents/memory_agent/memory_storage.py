@@ -319,11 +319,25 @@ class MemoryStorage:
 
     # ─── Connection Context Helper ────────────────────────────────────────────
 
+    def _ensure_conn(self) -> None:
+        """Ensure direct SQLite connection is open and initialized."""
+        if self.db_manager is not None:
+            return
+        if self.conn is None:
+            self._init_sqlite()
+            return
+        try:
+            # Check if connection is still alive
+            self.conn.execute("SELECT 1")
+        except Exception:
+            self._init_sqlite()
+
     def _execute_sql(self, sql: str, params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
         t0 = time.perf_counter()
         try:
             if self.db_manager is not None:
                 return self.db_manager.repository.fetch_all(sql, params)
+            self._ensure_conn()
             if not self.conn:
                 return []
             with self.conn:
@@ -345,6 +359,7 @@ class MemoryStorage:
         try:
             if self.db_manager is not None:
                 return self.db_manager.repository.execute(sql, params)
+            self._ensure_conn()
             if not self.conn:
                 return 0
             with self.conn:
@@ -980,4 +995,5 @@ class MemoryStorage:
                 self.conn.close()
             except Exception:
                 pass
+            self.conn = None
         self.lru_cache.clear()

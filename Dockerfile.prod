@@ -1,0 +1,71 @@
+# ── Production Dockerfile ─────────────────────────────────────────────────────
+# AI Virtual Brain System — Multi-stage security-hardened container image
+# Phase 15: Enterprise Deployment
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Stage 1: Builder
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Stage 2: Production
+FROM python:3.11-slim AS production
+
+# Security: run as non-root
+RUN groupadd -r vbrain && useradd -r -g vbrain -d /app -s /sbin/nologin vbrain
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# Install runtime dependencies only
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libpq5 curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy application code
+COPY orchestrator/ ./orchestrator/
+COPY agents/ ./agents/
+COPY services/ ./services/
+COPY communication_bus/ ./communication_bus/
+COPY config/ ./config/
+COPY main.py .
+COPY _validate_runtime.py .
+
+# Create required directories
+RUN mkdir -p data logs config && \
+    chown -R vbrain:vbrain /app
+
+# Security hardening
+RUN find /app -type f -name "*.py" -exec chmod 644 {} + && \
+    find /app -type d -exec chmod 755 {} +
+
+# Switch to non-root user
+USER vbrain
+
+# Environment defaults
+ENV HOST=0.0.0.0 \
+    PORT=8001 \
+    LOG_LEVEL=INFO \
+    DEBUG=false \
+    WORKERS=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+EXPOSE ${PORT}
+
+# Entry point
+CMD ["python", "-m", "uvicorn", "orchestrator.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]

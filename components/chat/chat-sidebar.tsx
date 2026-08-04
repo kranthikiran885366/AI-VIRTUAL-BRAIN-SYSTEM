@@ -4,19 +4,21 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import useSWR from "swr"
 import {
-  MessageSquarePlus,
+  MessageSquare,
   Search,
-  MoreHorizontal,
   Trash2,
   Archive,
-  Edit2,
   Brain,
   Settings,
   LogOut,
+  Workflow,
+  FolderOpen,
+  Plus
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
 import {
   Tooltip,
   TooltipContent,
@@ -35,6 +37,8 @@ interface ChatSidebarProps {
   onSelectConversation: (id: string) => void
   user?: { email?: string; full_name?: string }
   onSignOut?: () => void
+  currentView: "chat" | "dashboard" | "memory" | "files" | "settings"
+  onChangeView: (view: "chat" | "dashboard" | "memory" | "files" | "settings") => void
 }
 
 export function ChatSidebar({
@@ -44,10 +48,11 @@ export function ChatSidebar({
   onSelectConversation,
   user,
   onSignOut,
+  currentView,
+  onChangeView,
 }: ChatSidebarProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [hoveredId, setHoveredId] = useState<string | null>(null)
-  const router = useRouter()
 
   const { data: conversations, mutate } = useSWR<Conversation[]>(
     userId ? `/api/conversations?userId=${userId}` : null,
@@ -84,135 +89,178 @@ export function ChatSidebar({
       })
       mutate()
     } catch (error) {
-      console.error("[v0] Failed to archive conversation:", error)
+      console.error("Failed to archive conversation:", error)
     }
   }
 
   return (
     <TooltipProvider>
-      <div className="flex h-full w-64 flex-col bg-secondary/30 border-r border-border">
-        {/* Header */}
-        <div className="flex items-center gap-2 p-4 border-b border-border">
-          <div className="flex items-center gap-2 flex-1">
-            <div className="relative">
-              <Brain className="h-8 w-8 text-primary brain-active" />
-            </div>
-            <div className="flex flex-col">
-              <span className="font-semibold text-sm">Virtual Brain</span>
-              <span className="text-xs text-muted-foreground">AI Assistant</span>
-            </div>
+      <div className="flex h-full w-64 flex-col bg-background/95 border-r border-border/40 glass-panel">
+        
+        {/* Sidebar Header Brand */}
+        <div className="flex items-center gap-3 p-4 border-b border-border/30 shrink-0">
+          <div className="relative h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center text-primary shadow-inner">
+            <Brain className="h-5 w-5 text-primary brain-active" />
+          </div>
+          <div className="flex flex-col">
+            <span className="font-bold text-sm tracking-tight">Virtual Brain</span>
+            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Aesthetic AI OS</span>
           </div>
         </div>
 
-        {/* New Chat Button */}
-        <div className="p-3">
-          <Button
-            onClick={onNewChat}
-            className="w-full justify-start gap-2"
-            variant="outline"
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-            New Chat
-          </Button>
+        {/* Global Navigation Section */}
+        <div className="p-3 space-y-1 shrink-0">
+          {[
+            { id: "chat", label: "Agent Session (Chat)", icon: MessageSquare },
+            { id: "dashboard", label: "Brain Operations", icon: Workflow },
+            { id: "files", label: "File Vault", icon: FolderOpen },
+            { id: "settings", label: "Settings", icon: Settings },
+          ].map((nav) => {
+            const Icon = nav.icon
+            const isActive = currentView === nav.id
+            return (
+              <button
+                key={nav.id}
+                onClick={() => onChangeView(nav.id as any)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-xl transition-all",
+                  isActive 
+                    ? "bg-primary/10 text-primary border-l-2 border-primary" 
+                    : "text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
+                )}
+              >
+                <Icon className="h-4.5 w-4.5" />
+                {nav.label}
+              </button>
+            )
+          })}
         </div>
 
-        {/* Search */}
-        <div className="px-3 pb-2">
+        <Separator className="bg-border/30 px-3" />
+
+        {/* Chat Actions */}
+        <div className="p-3 shrink-0 flex items-center justify-between">
+          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-1">Recent Chats</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onNewChat}
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 text-muted-foreground hover:text-primary hover:bg-secondary/50 rounded-lg"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>New session</TooltipContent>
+          </Tooltip>
+        </div>
+
+        {/* Conversations Search */}
+        <div className="px-3 pb-2 shrink-0">
           <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground/60" />
             <Input
-              placeholder="Search conversations..."
+              placeholder="Search history..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-9 bg-background/50"
+              className="pl-8.5 h-8 text-xs bg-secondary/20 focus-visible:ring-primary border-none rounded-lg"
             />
           </div>
         </div>
 
-        {/* Conversations List */}
+        {/* Conversations List Scroll */}
         <ScrollArea className="flex-1 px-2">
-          <div className="space-y-1 py-2">
-            {filteredConversations?.map((conversation) => (
-              <div
-                key={conversation.id}
-                className={cn(
-                  "group relative flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors",
-                  currentConversationId === conversation.id
-                    ? "bg-primary/10 text-primary"
-                    : "hover:bg-accent text-foreground"
-                )}
-                onClick={() => onSelectConversation(conversation.id)}
-                onMouseEnter={() => setHoveredId(conversation.id)}
-                onMouseLeave={() => setHoveredId(null)}
-              >
-                <MessageSquarePlus className="h-4 w-4 shrink-0 opacity-60" />
-                <div className="flex-1 overflow-hidden">
-                  <p className="truncate font-medium">
-                    {truncate(conversation.title, 25)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(conversation.updated_at)}
-                  </p>
-                </div>
-
-                {/* Action buttons */}
-                {hoveredId === conversation.id && (
-                  <div className="absolute right-2 flex items-center gap-1">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={(e) => handleArchive(conversation.id, e)}
-                        >
-                          <Archive className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Archive</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={(e) => handleDelete(conversation.id, e)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Delete</TooltipContent>
-                    </Tooltip>
+          <div className="space-y-1 py-1">
+            {filteredConversations?.map((conversation) => {
+              const isSelected = currentConversationId === conversation.id && currentView === "chat"
+              return (
+                <div
+                  key={conversation.id}
+                  className={cn(
+                    "group relative flex items-center gap-2 rounded-xl px-3 py-2 text-xs cursor-pointer transition-all",
+                    isSelected
+                      ? "bg-primary/10 text-primary shadow-sm"
+                      : "hover:bg-secondary/30 text-foreground"
+                  )}
+                  onClick={() => onSelectConversation(conversation.id)}
+                  onMouseEnter={() => setHoveredId(conversation.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                >
+                  <MessageSquare className="h-4 w-4 shrink-0 opacity-60 text-muted-foreground" />
+                  <div className="flex-1 overflow-hidden">
+                    <p className="truncate font-semibold">
+                      {truncate(conversation.title, 22)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {formatDate(conversation.updated_at)}
+                    </p>
                   </div>
-                )}
-              </div>
-            ))}
+
+                  {/* Hover Actions */}
+                  {hoveredId === conversation.id && (
+                    <div className="absolute right-2 flex items-center gap-0.5 bg-background/90 p-0.5 rounded-lg border border-border/20 shadow-md">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 hover:bg-secondary"
+                            onClick={(e) => handleArchive(conversation.id, e)}
+                          >
+                            <Archive className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Archive</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={(e) => handleDelete(conversation.id, e)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Delete</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
 
             {filteredConversations?.length === 0 && (
-              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                {searchQuery ? "No conversations found" : "No conversations yet"}
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                {searchQuery ? "No sessions found" : "No sessions yet"}
               </div>
             )}
           </div>
         </ScrollArea>
 
-        {/* User Section */}
+        {/* User Account Section */}
         {user && (
-          <div className="border-t border-border p-3">
+          <div className="border-t border-border/30 p-3 shrink-0 bg-secondary/10">
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-medium text-sm">
+              <div className="h-8 w-8 rounded-xl bg-primary/20 flex items-center justify-center text-primary font-bold text-xs shadow-inner">
                 {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
               </div>
               <div className="flex-1 overflow-hidden">
-                <p className="truncate text-sm font-medium">
+                <p className="truncate text-xs font-semibold">
                   {user.full_name || user.email}
                 </p>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button size="icon" variant="ghost" className="h-8 w-8">
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      className="h-7 w-7 text-muted-foreground hover:text-primary rounded-lg"
+                      onClick={() => onChangeView("settings")}
+                    >
                       <Settings className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
@@ -224,7 +272,7 @@ export function ChatSidebar({
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-8 w-8"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive rounded-lg"
                         onClick={onSignOut}
                       >
                         <LogOut className="h-4 w-4" />

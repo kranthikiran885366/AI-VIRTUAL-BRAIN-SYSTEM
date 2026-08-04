@@ -50,6 +50,7 @@ class MessageType(str, Enum):
     DECISION_RESULT = "decision_result"
     LEARNING_UPDATE = "learning_update"
     PERCEPTION_INPUT = "perception_input"
+    PERCEPTION_EVENT = "perception_event"
     SOCIAL_INTERACTION = "social_interaction"
     PLANNING_REQUEST = "planning_request"
     CREATIVITY_IDEA = "creativity_idea"

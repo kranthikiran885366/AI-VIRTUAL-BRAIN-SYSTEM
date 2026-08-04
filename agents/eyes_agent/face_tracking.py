@@ -47,17 +47,24 @@ class FaceTracker:
     def _load_cascades(self):
         """Load face and eye detection cascades."""
         try:
-            self.face_cascade = cv2.CascadeClassifier(self.face_cascade_path)
-            self.eye_cascade = cv2.CascadeClassifier(self.eye_cascade_path)
-            
-            if self.face_cascade.empty() or self.eye_cascade.empty():
-                raise RuntimeError("Failed to load cascade classifiers")
-            
-            self.logger.info("Cascade classifiers loaded successfully")
-            
+            if hasattr(cv2, "CascadeClassifier"):
+                self.face_cascade = cv2.CascadeClassifier(self.face_cascade_path)
+                self.eye_cascade = cv2.CascadeClassifier(self.eye_cascade_path)
+                
+                if self.face_cascade.empty() or self.eye_cascade.empty():
+                    self.logger.warning("Cascade classifiers XML empty or not found; face tracking will use fallback.")
+                    self.face_cascade = None
+                    self.eye_cascade = None
+                else:
+                    self.logger.info("Cascade classifiers loaded successfully")
+            else:
+                self.logger.warning("OpenCV build lacks CascadeClassifier; face tracking will use fallback.")
+                self.face_cascade = None
+                self.eye_cascade = None
         except Exception as e:
-            self.logger.error(f"Failed to load cascade classifiers: {str(e)}")
-            raise
+            self.logger.warning(f"Cascade classifiers load deferred: {str(e)}")
+            self.face_cascade = None
+            self.eye_cascade = None
 
     async def track(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """Track faces in the frame."""

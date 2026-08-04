@@ -33,6 +33,7 @@ except ImportError:
     from ..base_agent import BaseAgent  # type: ignore
 
 try:
+    from agents.ear_agent.audio_utils import coerce_audio_array
     from agents.ear_agent.audio_listener import AudioListener
     from agents.ear_agent.speech_recognizer import SpeechRecognizer
     from agents.ear_agent.sound_classifier import SoundClassifier
@@ -41,6 +42,7 @@ try:
     from agents.ear_agent.language_detector import LanguageDetector
     from agents.ear_agent.intent_detector import IntentDetector
 except ImportError:
+    from .audio_utils import coerce_audio_array  # type: ignore
     from .audio_listener import AudioListener          # type: ignore
     from .speech_recognizer import SpeechRecognizer    # type: ignore
     from .sound_classifier import SoundClassifier      # type: ignore
@@ -360,9 +362,7 @@ class EarAgent(BaseAgent):
                 return {"error": "No audio data provided"}
             if self.speech_recognizer:
                 sr = int(data.get("sample_rate", self.config.get("audio", {}).get("sample_rate", 16000)))
-                import numpy as np
-                if not isinstance(audio, np.ndarray):
-                    audio = np.frombuffer(bytes(audio), dtype=np.int16)
+                audio = coerce_audio_array(audio)
                 return self.speech_recognizer.transcribe(audio, sample_rate=sr)
             return {"error": "SpeechRecognizer not available"}
 
@@ -371,9 +371,7 @@ class EarAgent(BaseAgent):
             if audio is None:
                 return {"error": "No audio data provided"}
             if self.emotion_detector:
-                import numpy as np
-                if not isinstance(audio, np.ndarray):
-                    audio = np.frombuffer(bytes(audio), dtype=np.int16)
+                audio = coerce_audio_array(audio)
                 results = await self.emotion_detector.detect_emotion(audio)
                 return {"emotions": results, "top": results[0] if results else None}
             return {"error": "EmotionDetector not available"}
@@ -385,9 +383,7 @@ class EarAgent(BaseAgent):
                 if text:
                     results = await self.intent_detector.detect_from_text(text)
                 elif audio is not None:
-                    import numpy as np
-                    if not isinstance(audio, np.ndarray):
-                        audio = np.frombuffer(bytes(audio), dtype=np.int16)
+                    audio = coerce_audio_array(audio)
                     results = await self.intent_detector.detect_intent(audio)
                 else:
                     return {"error": "Provide either text or audio"}
@@ -401,9 +397,7 @@ class EarAgent(BaseAgent):
                 if text:
                     results = await self.language_detector.detect_from_text(text)
                 elif audio is not None:
-                    import numpy as np
-                    if not isinstance(audio, np.ndarray):
-                        audio = np.frombuffer(bytes(audio), dtype=np.int16)
+                    audio = coerce_audio_array(audio)
                     results = await self.language_detector.detect_language(audio)
                 else:
                     return {"error": "Provide either text or audio"}
@@ -415,9 +409,7 @@ class EarAgent(BaseAgent):
             if audio is None:
                 return {"error": "No audio data provided"}
             if self.sound_classifier:
-                import numpy as np
-                if not isinstance(audio, np.ndarray):
-                    audio = np.frombuffer(bytes(audio), dtype=np.int16)
+                audio = coerce_audio_array(audio)
                 results = await self.sound_classifier.classify_sound(audio)
                 return {"sounds": results, "top": results[0] if results else None}
             return {"error": "SoundClassifier not available"}
@@ -427,21 +419,14 @@ class EarAgent(BaseAgent):
             if audio is None:
                 return {"error": "No audio data provided"}
             if self.speaker_identifier:
-                import numpy as np
-                if not isinstance(audio, np.ndarray):
-                    audio = np.frombuffer(bytes(audio), dtype=np.int16)
+                audio = coerce_audio_array(audio)
                 results = await self.speaker_identifier.identify_speaker(audio)
                 return {"speakers": results, "top": results[0] if results else None}
             return {"error": "SpeakerIdentifier not available"}
 
         if action == "add_speaker":
             if self.speaker_identifier:
-                import numpy as np
-                samples = [
-                    np.frombuffer(bytes(s), dtype=np.int16)
-                    if not isinstance(s, np.ndarray) else s
-                    for s in data.get("audio_samples", [])
-                ]
+                samples = [coerce_audio_array(s) for s in data.get("audio_samples", [])]
                 success = self.speaker_identifier.add_speaker(
                     data.get("speaker_id", ""),
                     data.get("name", "Unknown"),

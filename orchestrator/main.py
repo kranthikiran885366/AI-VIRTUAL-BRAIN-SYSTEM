@@ -37,17 +37,28 @@ from orchestrator.request_context import (
     set_request_context,
 )
 
+# Phase 15 — Enterprise Infrastructure
+from orchestrator.distributed.cluster_coordinator import ClusterCoordinator
+from orchestrator.security.auth_governance import SecurityGovernanceEngine
+from orchestrator.security.secrets_audit import SecretManager, AuditLogger
+from orchestrator.resilience.circuit_breaker import CircuitBreaker, BulkheadIsolator
+from orchestrator.resilience.dlq_disaster_recovery import DeadLetterQueue, DisasterRecoveryManager
+from orchestrator.observability_platform import ObservabilityPlatform
+from orchestrator.enterprise_ops import EnterpriseOpsManager
+
 DEFAULT_AGENT_CONFIG = {}
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
 os.makedirs("logs", exist_ok=True)
+_stream_handler = logging.StreamHandler()
+_stream_handler.stream = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1, closefd=False)
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("logs/orchestrator.log"),
-        logging.StreamHandler(),
+        logging.FileHandler("logs/orchestrator.log", encoding="utf-8"),
+        _stream_handler,
     ],
 )
 logger = logging.getLogger(__name__)
@@ -139,6 +150,8 @@ async def request_context_middleware(request: Request, call_next) -> Response:
     finally:
         clear_request_context(token)
 
+from orchestrator.autonomous_controller import AutonomousCognitiveController
+
 # ─── Global State ─────────────────────────────────────────────────────────────
 
 _agent_manager: Optional[AgentManager] = None
@@ -146,7 +159,20 @@ _task_scheduler: Optional[TaskScheduler] = None
 _communication_controller: Optional[CommunicationController] = None
 _database_manager: Optional[DatabaseManager] = None
 _decision_engine: Optional[DecisionEngine] = None
+_autonomous_controller: Optional[AutonomousCognitiveController] = None
 _startup_time = datetime.utcnow()
+
+# Phase 15 — Enterprise Infrastructure globals
+_cluster_coordinator: Optional[ClusterCoordinator] = None
+_security_engine: Optional[SecurityGovernanceEngine] = None
+_secret_manager: Optional[SecretManager] = None
+_audit_logger: Optional[AuditLogger] = None
+_circuit_breaker: Optional[CircuitBreaker] = None
+_bulkhead: Optional[BulkheadIsolator] = None
+_dlq: Optional[DeadLetterQueue] = None
+_disaster_recovery: Optional[DisasterRecoveryManager] = None
+_observability_platform: Optional[ObservabilityPlatform] = None
+_enterprise_ops: Optional[EnterpriseOpsManager] = None
 
 # In-memory agent state (used when no DB)
 _agent_states: Dict[str, Dict[str, Any]] = {}
@@ -164,6 +190,10 @@ class Orchestrator:
     @property
     def agent_manager(self) -> Optional[AgentManager]:
         return _agent_manager
+
+    @property
+    def autonomous_controller(self) -> Optional[AutonomousCognitiveController]:
+        return _autonomous_controller
 
     @property
     def message_broker(self):
@@ -187,10 +217,12 @@ class Orchestrator:
         agents = {}
         if _agent_manager:
             agents = await _agent_manager.get_status()
+        cognitive_status = _autonomous_controller.get_status() if _autonomous_controller else {}
         return {
             "status": "running" if self.is_running else "stopped",
             "uptime_seconds": (datetime.utcnow() - _startup_time).total_seconds(),
             "agents": agents,
+            "cognitive_controller": cognitive_status,
         }
 
     @property
@@ -388,6 +420,12 @@ async def startup():
         if not runtime_report["ok"]:
             raise RuntimeError("Invalid orchestrator runtime configuration: " + "; ".join(runtime_report["errors"]))
 
+        if not settings.DEBUG and not settings.SECURITY_ENABLED:
+            logger.warning(
+                "SECURITY WARNING: SECURITY_ENABLED=false in non-debug mode. "
+                "Set SECURITY_ENABLED=true and configure JWT_SECRET_KEY for production."
+            )
+
         _database_manager = DatabaseManager(DatabaseConfig(database_path=_resolve_database_path(settings.DATABASE_URL)))
         _database_manager.initialize()
         db_health = _database_manager.health_check()
@@ -396,11 +434,11 @@ async def startup():
 
         broker = get_message_broker()
         await asyncio.wait_for(broker.start(), timeout=float(settings.STARTUP_TIMEOUT))
-        logger.info("✓ Message broker started")
+        logger.info("[OK] Message broker started")
 
         lifecycle = get_lifecycle_manager()
         await asyncio.wait_for(lifecycle.start(), timeout=float(settings.STARTUP_TIMEOUT))
-        logger.info("✓ Lifecycle manager started")
+        logger.info("[OK] Lifecycle manager started")
 
         global _communication_controller
         _communication_controller = CommunicationController({
@@ -418,11 +456,11 @@ async def startup():
             "max_payload_bytes": 1_048_576,
         })
         await asyncio.wait_for(_communication_controller.initialize(), timeout=float(settings.STARTUP_TIMEOUT))
-        logger.info("✓ Communication controller started")
+        logger.info("[OK] Communication controller started")
 
         # Initialize agent manager and load concrete agent implementations
         default_agents = [
-            "orchestrator_agent", "memory_agent", "emotion_agent", "decision_agent",
+            "memory_agent", "emotion_agent", "decision_agent",
             "learning_agent", "reasoning_agent", "creativity_agent", "task_agent",
             "planning_agent", "perception_agent", "language_agent", "social_agent",
             "motivation_agent", "ethics_agent", "eyes_agent", "ear_agent", "mouth_agent",
@@ -432,7 +470,7 @@ async def startup():
         _agent_manager = AgentManager(default_agent_config)
         await asyncio.wait_for(_agent_manager.initialize(), timeout=float(settings.STARTUP_TIMEOUT))
         await asyncio.wait_for(_agent_manager.start(), timeout=float(settings.STARTUP_TIMEOUT))
-        logger.info(f"✓ Agent manager started with {len(_agent_manager.agents)} agents")
+        logger.info(f"[OK] Agent manager started with {len(_agent_manager.agents)} agents")
 
         _task_scheduler = TaskScheduler({
             "max_concurrent_tasks": settings.MAX_CONCURRENT_TASKS,
@@ -446,7 +484,7 @@ async def startup():
         for agent_name, agent_instance in _agent_manager.agents.items():
             await _task_scheduler.register_worker(agent_name, agent_instance, pool="agents")
         await asyncio.wait_for(_task_scheduler.start(), timeout=float(settings.STARTUP_TIMEOUT))
-        logger.info(f"✓ Task scheduler started with {len(_task_scheduler.workers)} workers")
+        logger.info(f"[OK] Task scheduler started with {len(_task_scheduler.workers)} workers")
 
         # Register loaded agents with lifecycle manager
         for agent_id, agent_instance in _agent_manager.agents.items():
@@ -454,7 +492,7 @@ async def startup():
             lifecycle.agents[agent_id]["is_running"] = True
             lifecycle.agent_health[agent_id].status = "healthy"
 
-        logger.info(f"✓ {len(_agent_manager.agents)} agents registered")
+        logger.info(f"[OK] {len(_agent_manager.agents)} agents registered")
 
         # ── Phase 4: Decision Engine ──────────────────────────────────────
         global _decision_engine
@@ -469,14 +507,75 @@ async def startup():
             agent_health=_snapshot["agent_health"],
             agent_load=_snapshot["agent_load"],
         )
-        logger.info(f"✓ Decision engine started (phase4={_PHASE4_AVAILABLE})")
+        logger.info(f"[OK] Decision engine started (phase4={_PHASE4_AVAILABLE})")
 
-        logger.info(f"✓ API server ready on http://0.0.0.0:{settings.PORT}")
+        # ── Phase 14: Autonomous Cognitive Controller ──────────────────────
+        global _autonomous_controller
+        _autonomous_controller = AutonomousCognitiveController(settings.model_dump())
+        _autonomous_controller.wire(
+            agent_manager=_agent_manager,
+            lifecycle_manager=lifecycle,
+            task_scheduler=_task_scheduler,
+            message_broker=broker,
+            communication_controller=_communication_controller,
+        )
+        await _autonomous_controller.start()
+        logger.info("[OK] Autonomous Cognitive Controller started (Phase 14)")
+
+        # ── Phase 15: Enterprise Infrastructure ───────────────────────────
+        global _cluster_coordinator, _security_engine, _secret_manager
+        global _audit_logger, _circuit_breaker, _bulkhead
+        global _dlq, _disaster_recovery, _observability_platform, _enterprise_ops
+
+        # Distributed cluster coordinator
+        _cluster_coordinator = ClusterCoordinator(config={
+            "cluster": {
+                "node_id": settings.CLUSTER_NODE_ID,
+                "heartbeat_timeout_seconds": settings.CLUSTER_HEARTBEAT_INTERVAL,
+                "renew_interval_seconds": max(1, settings.CLUSTER_HEARTBEAT_INTERVAL // 3),
+                "lease_duration_seconds": settings.CLUSTER_LEADER_LEASE_TTL,
+            }
+        })
+        await _cluster_coordinator.start()
+        logger.info("[OK] Cluster Coordinator started (Phase 15)")
+
+        # Security governance
+        _security_engine = SecurityGovernanceEngine()
+        _secret_manager = SecretManager()
+        _audit_logger = _secret_manager.get_audit_logger()
+        logger.info("[OK] Security Governance & Audit initialized (Phase 15)")
+
+        # Resilience infrastructure
+        _circuit_breaker = CircuitBreaker(
+            name="orchestrator-main",
+            failure_threshold=settings.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+            recovery_timeout=settings.CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
+        )
+        _bulkhead = BulkheadIsolator(name="orchestrator-main", max_concurrent=20, max_queue=100)
+        _dlq = DeadLetterQueue(max_size=settings.DLQ_MAX_SIZE)
+        _disaster_recovery = DisasterRecoveryManager()
+        logger.info("[OK] Circuit Breaker, Bulkhead, DLQ & DR initialized (Phase 15)")
+
+        # Observability platform
+        _observability_platform = ObservabilityPlatform()
+        logger.info("[OK] Observability Platform initialized (Phase 15)")
+
+        # Enterprise operations
+        _enterprise_ops = EnterpriseOpsManager()
+        # Register config reload source
+        _enterprise_ops.config_reloader.register_source(
+            "orchestrator_settings", lambda: settings.reload()
+        )
+        logger.info("[OK] Enterprise Operations Manager initialized (Phase 15)")
+
+        logger.info(f"[OK] API server ready on http://0.0.0.0:{settings.PORT}")
         logger.info("=" * 60)
 
     except Exception as e:
         logger.error(f"Startup error: {e}", exc_info=True)
         try:
+            if _autonomous_controller:
+                await _autonomous_controller.stop()
             if _agent_manager:
                 await _agent_manager.stop()
             if _database_manager:
@@ -496,6 +595,12 @@ async def shutdown():
     try:
         broker = get_message_broker()
         lifecycle = get_lifecycle_manager()
+        # Phase 15 shutdown
+        if _cluster_coordinator:
+            await asyncio.wait_for(_cluster_coordinator.stop(), timeout=float(settings.SHUTDOWN_TIMEOUT))
+        # Phase 14 shutdown
+        if _autonomous_controller:
+            await asyncio.wait_for(_autonomous_controller.stop(), timeout=float(settings.SHUTDOWN_TIMEOUT))
         if _decision_engine:
             await asyncio.wait_for(_decision_engine.stop(), timeout=float(settings.SHUTDOWN_TIMEOUT))
         if _agent_manager:
@@ -537,6 +642,7 @@ async def health_check():
     }
 
 @app.get("/stats")
+@app.get("/status")
 async def get_stats():
     lifecycle = get_lifecycle_manager()
     broker = get_message_broker()
@@ -568,9 +674,14 @@ async def get_stats():
         },
     }
 
+@app.get("/metrics")
+async def get_metrics_alias():
+    return runtime_observability.snapshot().__dict__
+
 # ─── Agent Endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/agents")
+@app.get("/agents/status")
 async def list_agents():
     lifecycle = get_lifecycle_manager()
     statuses = await lifecycle.get_all_agent_statuses()
@@ -823,6 +934,295 @@ async def route_status():
     if _decision_engine is None:
         return {"status": "not_initialized"}
     return await _decision_engine.get_status()
+
+
+# ─── Phase 14 Cognitive Controller Endpoints ─────────────────────────────────
+
+@app.get("/api/v1/cognitive/state")
+async def get_cognitive_state():
+    """Return synchronized Global Cognitive State."""
+    if _autonomous_controller is None:
+        raise HTTPException(status_code=503, detail="Autonomous Cognitive Controller not running")
+    return _autonomous_controller.get_global_state()
+
+
+@app.get("/api/v1/cognitive/reports")
+async def get_cognitive_reports(limit: int = 50):
+    """Return monitoring reports history."""
+    if _autonomous_controller is None:
+        raise HTTPException(status_code=503, detail="Autonomous Cognitive Controller not running")
+    return _autonomous_controller.monitoring_engine.get_report_history(limit=limit)
+
+
+@app.post("/api/v1/cognitive/heal")
+async def trigger_cognitive_healing(body: Dict[str, Any]):
+    """Trigger a self-healing action on a target agent."""
+    if _autonomous_controller is None:
+        raise HTTPException(status_code=503, detail="Autonomous Cognitive Controller not running")
+    target_agent = body.get("target_agent")
+    reason = body.get("reason", "Manual trigger")
+    if not target_agent:
+        raise HTTPException(status_code=422, detail="target_agent is required")
+    action = await _autonomous_controller.healing_engine.recover_agent(
+        target_agent=target_agent,
+        reason=reason,
+        triggered_by="api_request",
+    )
+    return action.to_dict()
+
+
+@app.post("/api/v1/cognitive/optimize")
+async def trigger_cognitive_optimization():
+    """Trigger an on-demand adaptive execution optimization cycle."""
+    if _autonomous_controller is None:
+        raise HTTPException(status_code=503, detail="Autonomous Cognitive Controller not running")
+    session = await _autonomous_controller.adaptive_optimizer.run_optimization_cycle()
+    return session.to_dict()
+
+
+@app.get("/api/v1/cognitive/policies")
+async def list_cognitive_policies():
+    """List operational policies."""
+    if _autonomous_controller is None:
+        raise HTTPException(status_code=503, detail="Autonomous Cognitive Controller not running")
+    return _autonomous_controller.policy_engine.list_policies()
+
+
+@app.post("/api/v1/cognitive/policies")
+async def create_cognitive_policy(body: Dict[str, Any]):
+    """Register or update an operational policy."""
+    if _autonomous_controller is None:
+        raise HTTPException(status_code=503, detail="Autonomous Cognitive Controller not running")
+    from orchestrator.cognitive_models import Policy
+    try:
+        policy = Policy.from_dict(body)
+        success = _autonomous_controller.policy_engine.register_policy(policy)
+        if not success:
+            raise HTTPException(status_code=400, detail="Invalid policy configuration")
+        return policy.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/cognitive/analytics")
+async def get_cognitive_analytics():
+    """Return execution analytics."""
+    if _autonomous_controller is None:
+        raise HTTPException(status_code=503, detail="Autonomous Cognitive Controller not running")
+    hardware = _autonomous_controller.resource_governor.get_hardware_utilization()
+    analytics = _autonomous_controller.execution_analytics.generate_analytics(
+        cpu_utilization=hardware["cpu"],
+        memory_utilization=hardware["memory"],
+        gpu_utilization=hardware["gpu"],
+    )
+    return analytics.to_dict()
+
+# ─── Phase 15: Enterprise API Endpoints ──────────────────────────────────────
+
+@app.get("/api/v1/cluster/status")
+async def get_cluster_status():
+    """Return cluster coordinator status."""
+    if _cluster_coordinator is None:
+        raise HTTPException(status_code=503, detail="Cluster coordinator not running")
+    return _cluster_coordinator.get_status()
+
+
+@app.get("/api/v1/cluster/nodes")
+async def list_cluster_nodes():
+    """List registered cluster nodes."""
+    if _cluster_coordinator is None:
+        raise HTTPException(status_code=503, detail="Cluster coordinator not running")
+    return _cluster_coordinator.node_registry.list_nodes()
+
+
+@app.get("/api/v1/security/status")
+async def get_security_status():
+    """Return security governance status."""
+    if _security_engine is None:
+        raise HTTPException(status_code=503, detail="Security engine not initialized")
+    return _security_engine.get_status()
+
+
+@app.get("/api/v1/security/audit")
+async def get_audit_log(limit: int = 100):
+    """Return recent audit log entries."""
+    if _audit_logger is None:
+        raise HTTPException(status_code=503, detail="Audit logger not initialized")
+    return _audit_logger.export_events()[-limit:]
+
+
+@app.get("/api/v1/resilience/circuit-breaker")
+async def get_circuit_breaker_status():
+    """Return circuit breaker status."""
+    if _circuit_breaker is None:
+        raise HTTPException(status_code=503, detail="Circuit breaker not initialized")
+    return _circuit_breaker.get_stats()
+
+
+@app.post("/api/v1/resilience/circuit-breaker/reset")
+async def reset_circuit_breaker():
+    """Reset circuit breaker to CLOSED state."""
+    if _circuit_breaker is None:
+        raise HTTPException(status_code=503, detail="Circuit breaker not initialized")
+    _circuit_breaker.reset()
+    return {"status": "reset", "state": _circuit_breaker.state.value}
+
+
+@app.get("/api/v1/resilience/dlq")
+async def get_dlq_status():
+    """Return dead-letter queue status."""
+    if _dlq is None:
+        raise HTTPException(status_code=503, detail="DLQ not initialized")
+    return _dlq.get_stats()
+
+
+@app.get("/api/v1/resilience/dlq/entries")
+async def list_dlq_entries(status: Optional[str] = None, limit: int = 50):
+    """List DLQ entries."""
+    if _dlq is None:
+        raise HTTPException(status_code=503, detail="DLQ not initialized")
+    entries = _dlq.list_entries(status=status, limit=limit)
+    return [e.to_dict() for e in entries]
+
+
+@app.get("/api/v1/resilience/disaster-recovery")
+async def get_dr_status():
+    """Return disaster recovery readiness status."""
+    if _disaster_recovery is None:
+        raise HTTPException(status_code=503, detail="DR not initialized")
+    return _disaster_recovery.get_recovery_status()
+
+
+@app.post("/api/v1/resilience/disaster-recovery/backup")
+async def create_backup(body: Dict[str, Any]):
+    """Create a backup manifest."""
+    if _disaster_recovery is None:
+        raise HTTPException(status_code=503, detail="DR not initialized")
+    components = body.get("components", ["orchestrator", "agents", "memory"])
+    manifest = _disaster_recovery.create_backup(components=components, metadata=body.get("metadata"))
+    return manifest.to_dict()
+
+
+@app.post("/api/v1/resilience/disaster-recovery/failover-test")
+async def simulate_failover():
+    """Simulate failover for DR validation."""
+    if _disaster_recovery is None:
+        raise HTTPException(status_code=503, detail="DR not initialized")
+    return _disaster_recovery.simulate_failover()
+
+
+@app.get("/api/v1/observability/metrics")
+async def get_observability_metrics():
+    """Return Prometheus-format metrics."""
+    if _observability_platform is None:
+        raise HTTPException(status_code=503, detail="Observability platform not initialized")
+    return Response(content=_observability_platform.metrics.export_text(), media_type="text/plain")
+
+
+@app.get("/api/v1/observability/traces")
+async def get_traces(limit: int = 50):
+    """Return recent traces."""
+    if _observability_platform is None:
+        raise HTTPException(status_code=503, detail="Observability platform not initialized")
+    return _observability_platform.tracing.get_traces(limit=limit)
+
+
+@app.get("/api/v1/observability/slo")
+async def get_slo_status():
+    """Return SLO compliance status."""
+    if _observability_platform is None:
+        raise HTTPException(status_code=503, detail="Observability platform not initialized")
+    return _observability_platform.slo_tracker.get_slo_status()
+
+
+@app.get("/api/v1/observability/status")
+async def get_observability_full_status():
+    """Return full observability platform status."""
+    if _observability_platform is None:
+        raise HTTPException(status_code=503, detail="Observability platform not initialized")
+    return _observability_platform.get_full_status()
+
+
+@app.get("/api/v1/ops/status")
+async def get_enterprise_ops_status():
+    """Return enterprise operations status."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    return _enterprise_ops.get_full_status()
+
+
+@app.get("/api/v1/ops/maintenance")
+async def get_maintenance_status():
+    """Return maintenance mode status."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    return _enterprise_ops.maintenance.get_status()
+
+
+@app.post("/api/v1/ops/maintenance")
+async def toggle_maintenance(body: Dict[str, Any]):
+    """Enable or disable maintenance mode."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    if body.get("enabled", False):
+        _enterprise_ops.maintenance.enable(
+            reason=body.get("reason", "Manual activation"),
+            scheduled_end=body.get("scheduled_end"),
+        )
+    else:
+        _enterprise_ops.maintenance.disable()
+    return _enterprise_ops.maintenance.get_status()
+
+
+@app.get("/api/v1/ops/features")
+async def list_feature_flags():
+    """List all feature flags."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    return _enterprise_ops.features.list_flags()
+
+
+@app.post("/api/v1/ops/features")
+async def update_feature_flags(body: Dict[str, Any]):
+    """Update feature flags."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    _enterprise_ops.features.bulk_update(body)
+    return _enterprise_ops.features.list_flags()
+
+
+@app.get("/api/v1/ops/diagnostics")
+async def run_diagnostics():
+    """Run cluster diagnostics."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    return _enterprise_ops.diagnostics.run_diagnostics()
+
+
+@app.get("/api/v1/ops/dependencies")
+async def check_dependencies():
+    """Check optional dependency availability."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    return _enterprise_ops.diagnostics.check_dependencies()
+
+
+@app.post("/api/v1/ops/reload")
+async def reload_configuration(body: Dict[str, Any]):
+    """Hot-reload configuration sources."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    source = body.get("source")
+    return _enterprise_ops.config_reloader.reload(source_name=source)
+
+
+@app.get("/api/v1/ops/upgrade-compatibility")
+async def check_upgrade_compatibility():
+    """Check cross-phase upgrade compatibility."""
+    if _enterprise_ops is None:
+        raise HTTPException(status_code=503, detail="Enterprise ops not initialized")
+    return _enterprise_ops.upgrade_checker.check_compatibility()
+
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 

@@ -17,12 +17,20 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, Set
 
-from planning_models import (
-    ResourceRequirement,
-    ResourceAllocation,
-    ResourceProfile,
-    DecomposedTask,
-)
+try:
+    from agents.planning_models import (
+        ResourceRequirement,
+        ResourceAllocation,
+        ResourceProfile,
+        DecomposedTask,
+    )
+except ImportError:
+    from planning_models import (  # type: ignore[no-redef]
+        ResourceRequirement,
+        ResourceAllocation,
+        ResourceProfile,
+        DecomposedTask,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -549,3 +557,27 @@ class ResourcePlanner:
             "default_skills": len(self.default_skills),
             "effort_levels": list(self.skill_effort_mapping.keys()),
         }
+
+
+# ── Sync-compatible ResourceManager facade (test API) ────────────────────
+
+class ResourceManager:
+    """Sync-compatible resource manager for tests."""
+
+    def __init__(self, config=None):
+        self._registry = ResourceRegistry(config)
+        self._resources: Dict[str, Dict[str, Any]] = {}
+
+    def register_resource(self, name: str, resource_type: str = "skill",
+                          capacity: float = 40.0) -> None:
+        self._resources[name] = {"name": name, "type": resource_type,
+                                  "capacity": capacity, "allocated": 0.0}
+
+    def get_available_resources(self) -> List[Dict[str, Any]]:
+        return list(self._resources.values())
+
+    def check_availability(self, name: str, hours: float) -> bool:
+        r = self._resources.get(name)
+        if r is None:
+            return False
+        return (r["capacity"] - r["allocated"]) >= hours

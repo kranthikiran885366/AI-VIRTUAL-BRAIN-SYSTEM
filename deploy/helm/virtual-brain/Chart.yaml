@@ -1,0 +1,16 @@
+apiVersion: v2
+name: virtual-brain
+description: AI Virtual Brain System — Enterprise Helm Chart
+type: application
+version: 1.15.0
+appVersion: "1.15.0"
+keywords:
+  - ai
+  - virtual-brain
+  - cognitive-system
+  - orchestrator
+maintainers:
+  - name: AI Virtual Brain Team
+home: https://github.com/ai-virtual-brain-system
+sources:
+  - https://github.com/ai-virtual-brain-system

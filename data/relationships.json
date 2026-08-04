@@ -1,0 +1,48 @@
+{
+  "profiles": {
+    "unknown": {
+      "status": "developing",
+      "first_interaction": "2026-08-04T12:17:59.001426+00:00",
+      "last_interaction": "2026-08-04T12:47:31.094555+00:00",
+      "interaction_count": 3,
+      "preferred_formality": "neutral",
+      "communication_style": "conversational_response",
+      "emotional_trend": [
+        "neutral",
+        "neutral",
+        "neutral"
+      ]
+    }
+  },
+  "trust": {
+    "unknown": 0.5
+  },
+  "rapport": {
+    "unknown": 0.5
+  },
+  "history": {
+    "unknown": [
+      {
+        "timestamp": "2026-08-04T12:17:59.002409+00:00",
+        "interaction_type": "statement",
+        "emotion_sentiment": "neutral",
+        "formality": "neutral",
+        "intent": "general_statement"
+      },
+      {
+        "timestamp": "2026-08-04T12:39:08.764402+00:00",
+        "interaction_type": "statement",
+        "emotion_sentiment": "neutral",
+        "formality": "neutral",
+        "intent": "general_statement"
+      },
+      {
+        "timestamp": "2026-08-04T12:47:31.094555+00:00",
+        "interaction_type": "statement",
+        "emotion_sentiment": "neutral",
+        "formality": "neutral",
+        "intent": "general_statement"
+      }
+    ]
+  }
+}

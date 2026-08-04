@@ -18,14 +18,24 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 
-from planning_models import (
-    GoalNode,
-    Goal,
-    GoalStatus,
-    GoalPriority,
-    GoalCategory,
-    GoalConstraint,
-)
+try:
+    from agents.planning_models import (
+        GoalNode,
+        Goal,
+        GoalStatus,
+        GoalPriority,
+        GoalCategory,
+        GoalConstraint,
+    )
+except ImportError:
+    from planning_models import (  # type: ignore[no-redef]
+        GoalNode,
+        Goal,
+        GoalStatus,
+        GoalPriority,
+        GoalCategory,
+        GoalConstraint,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -456,3 +466,76 @@ class GoalManager:
                 self._calculate_node_depth(gid) for gid in self.goal_nodes.keys()
             ) if self.goal_nodes else 0,
         }
+
+    # ── Sync compatibility wrappers (test API) ────────────────────────────
+
+    def add_goal(self, goal: Any) -> bool:
+        """Sync: register a compat Goal/GoalNode object."""
+        goal_id = getattr(goal, 'id', None) or getattr(goal, 'goal_id', str(uuid.uuid4()))
+        title = getattr(goal, 'title', '') or getattr(goal, 'goal_title', '')
+        parent_id = getattr(goal, 'parent_goal_id', None)
+        status = getattr(goal, 'status', GoalStatus.ACTIVE)
+        node = GoalNode(
+            goal_id=goal_id,
+            parent_goal_id=parent_id,
+            goal_title=title,
+            status=status if isinstance(status, GoalStatus) else GoalStatus.ACTIVE,
+        )
+        g = Goal(goal_id=goal_id, root_node=node)
+        g.all_nodes[goal_id] = node
+        self.goal_nodes[goal_id] = node
+        self.goals[goal_id] = g
+        self.goal_dependencies.setdefault(goal_id, [])
+        if parent_id:
+            self.goal_hierarchy.setdefault(parent_id, []).append(goal_id)
+            if parent_id in self.goal_nodes:
+                self.goal_nodes[parent_id].child_goal_ids.append(goal_id)
+        return True
+
+    def get_goal(self, goal_id: str) -> Optional[Any]:
+        """Sync: return goal node or None."""
+        node = self.goal_nodes.get(goal_id)
+        if node is None:
+            return None
+        # Return a simple object the tests can inspect
+        class _G:
+            pass
+        g = _G()
+        g.id = node.goal_id
+        g.title = node.goal_title
+        g.status = node.status
+        return g
+
+    def get_goal_hierarchy(self, goal_id: str) -> Optional[Dict[str, Any]]:
+        """Sync: return hierarchy dict with 'children' list."""
+        if goal_id not in self.goal_nodes:
+            return None
+        children = self.goal_hierarchy.get(goal_id, [])
+        return {"goal_id": goal_id, "children": children}
+
+    def add_dependency(self, target_id: str, source_id: str) -> bool:
+        """Sync: add dependency; return False if cycle detected."""
+        if target_id not in self.goals or source_id not in self.goals:
+            return False
+        if self._would_create_cycle(source_id, target_id):
+            return False
+        self.goal_dependencies.setdefault(target_id, [])
+        if source_id not in self.goal_dependencies[target_id]:
+            self.goal_dependencies[target_id].append(source_id)
+        node = self.goal_nodes.get(target_id)
+        if node and source_id not in node.dependencies:
+            node.dependencies.append(source_id)
+        return True
+
+    def add_constraint(self, goal_id: str, constraint: Any) -> bool:
+        """Sync: attach a constraint object to a goal."""
+        if goal_id not in self.goal_nodes:
+            return False
+        node = self.goal_nodes[goal_id]
+        gc = GoalConstraint(
+            name=getattr(constraint, 'description', ''),
+            description=getattr(constraint, 'description', ''),
+            constraint_type=getattr(constraint, 'type', 'general'),
+        )
+        node.constraints.append(gc)
+        return True

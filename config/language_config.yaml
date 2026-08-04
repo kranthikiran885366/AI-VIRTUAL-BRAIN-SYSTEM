@@ -1,0 +1,109 @@
+# Language Intelligence Engine Configuration — Phase 9
+# All operational parameters are externalized here.
+
+language:
+  version: "9.0.0"
+
+  # Supported languages (ISO 639-1 codes)
+  supported_languages:
+    - en
+    - es
+    - fr
+    - de
+    - hi
+    - ar
+    - zh
+    - pt
+    - ru
+    - ja
+
+  # Understanding thresholds
+  understanding:
+    min_confidence: 0.30
+    high_confidence: 0.75
+    intent_confidence_threshold: 0.50
+    entity_min_score: 0.40
+    ambiguity_threshold: 0.45
+    max_text_length: 50000
+    max_tokens_estimate: 8000
+
+  # Semantic analysis
+  semantic:
+    similarity_threshold: 0.60
+    topic_min_score: 0.40
+    max_topics: 10
+    max_concepts: 20
+    max_keywords: 15
+    concept_min_frequency: 2
+
+  # Summarization
+  summarization:
+    short_ratio: 0.25
+    medium_ratio: 0.35
+    long_ratio: 0.50
+    min_sentence_length: 20
+    max_summary_sentences: 10
+    importance_word_bonus: 2.0
+    position_first_bonus: 3.0
+    position_last_bonus: 2.0
+
+  # Quality engine thresholds
+  quality:
+    good_threshold: 0.75
+    acceptable_threshold: 0.50
+    poor_threshold: 0.30
+    max_passive_voice: 2
+    max_filler_words: 3
+    max_avg_sentence_length: 30
+    min_avg_sentence_length: 8
+    readability_target: 0.70
+
+  # Conversation management
+  conversation:
+    max_history_per_session: 200
+    max_active_sessions: 500
+    session_timeout_minutes: 60
+    topic_switch_threshold: 0.40
+    context_window: 10
+    summary_trigger_length: 50
+
+  # Translation
+  translation:
+    confidence_threshold: 0.70
+    max_text_length: 10000
+    detect_min_patterns: 3
+
+  # Document processing
+  document:
+    max_document_length: 200000
+    max_sections: 50
+    min_section_length: 100
+    title_max_length: 200
+    metadata_max_fields: 20
+
+  # History and persistence
+  history:
+    max_processing_history: 2000
+    max_session_history: 500
+    max_audit_trail: 5000
+    max_quality_history: 1000
+
+  # Timeouts
+  timeouts:
+    processing_timeout_seconds: 10.0
+    translation_timeout_seconds: 15.0
+    document_timeout_seconds: 30.0
+
+  # Broker events
+  broker_events:
+    emit_language_updates: true
+    emit_quality_alerts: true
+    min_quality_to_emit: 0.50
+
+  # Improvement pipeline
+  improvement:
+    max_replacements: 50
+    enable_contraction_expansion: true
+    enable_filler_removal: true
+    enable_passive_reduction: true
+    enable_wordiness_reduction: true

@@ -6,10 +6,29 @@ from pathlib import Path
 import aiohttp
 import os
 import tempfile
-from elevenlabs import generate, set_api_key
-import pyttsx3
-import sounddevice as sd
-import numpy as np
+try:
+    from elevenlabs import generate, set_api_key
+    _ELEVENLABS_AVAILABLE = True
+except ImportError:
+    _ELEVENLABS_AVAILABLE = False
+    generate = None
+    set_api_key = None
+
+try:
+    import pyttsx3
+    _PYTTSX3_AVAILABLE = True
+except ImportError:
+    _PYTTSX3_AVAILABLE = False
+    pyttsx3 = None
+
+try:
+    import sounddevice as sd
+    import numpy as np
+    _AUDIO_AVAILABLE = True
+except ImportError:
+    _AUDIO_AVAILABLE = False
+    sd = None
+    np = None
 
 class TTSEngine:
     def __init__(self, engine_config: Dict[str, Any]):
@@ -36,15 +55,19 @@ class TTSEngine:
         """Initialize the TTS engine"""
         try:
             self.session = aiohttp.ClientSession()
-            
-            # Initialize appropriate engine
             if self.current_engine == "elevenlabs":
-                api_key = self.api_keys.get("elevenlabs")
-                if api_key:
-                    set_api_key(api_key)
-            elif self.current_engine == "pyttsx3":
-                self.engine = pyttsx3.init()
-                
+                if not _ELEVENLABS_AVAILABLE:
+                    self.logger.warning("elevenlabs not installed; falling back to pyttsx3")
+                    self.current_engine = "pyttsx3"
+                else:
+                    api_key = self.api_keys.get("elevenlabs")
+                    if api_key:
+                        set_api_key(api_key)
+            if self.current_engine == "pyttsx3":
+                if _PYTTSX3_AVAILABLE:
+                    self.engine = pyttsx3.init()
+                else:
+                    self.logger.warning("pyttsx3 not installed; TTS synthesis disabled")
             self.logger.info(f"TTS Engine initialized with {self.current_engine}")
         except Exception as e:
             self.logger.error(f"Error initializing TTS engine: {e}")
@@ -68,57 +91,45 @@ class TTSEngine:
 
     async def _speak_elevenlabs(self, text: str, voice_config: Dict[str, Any]) -> None:
         """Use ElevenLabs API for speech synthesis"""
+        if not _ELEVENLABS_AVAILABLE:
+            self.logger.warning("elevenlabs not available; skipping synthesis")
+            return
         try:
             api_key = self.api_keys.get("elevenlabs")
             if not api_key:
                 raise ValueError("ElevenLabs API key not found")
-            
-            # Generate speech
             audio = generate(
                 text=text,
-                voice="Josh",  # Default voice, can be configured
+                voice="Josh",
                 model="eleven_monolingual_v1"
             )
-            
-            # Save to temporary file
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
                 temp_file.write(audio)
                 temp_path = temp_file.name
-            
-            # Play audio
             await self._play_audio_file(temp_path)
-            
-            # Clean up
             os.unlink(temp_path)
-            
         except Exception as e:
             self.logger.error(f"Error in ElevenLabs TTS: {e}")
             raise
 
     async def _speak_pyttsx3(self, text: str, voice_config: Dict[str, Any]) -> None:
         """Use pyttsx3 for speech synthesis"""
+        if not _PYTTSX3_AVAILABLE:
+            self.logger.warning("pyttsx3 not available; skipping synthesis")
+            return
         try:
             if not self.engine:
                 self.engine = pyttsx3.init()
-            
-            # Configure voice settings
             self.engine.setProperty('rate', int(200 * voice_config.get("speed", 1.0)))
             self.engine.setProperty('volume', voice_config.get("volume", 1.0))
-            
-            # Get available voices
             voices = self.engine.getProperty('voices')
-            
-            # Set voice based on gender
             if voice_config.get("gender") == "female":
                 for voice in voices:
                     if "female" in voice.name.lower():
                         self.engine.setProperty('voice', voice.id)
                         break
-            
-            # Generate speech
             self.engine.say(text)
             self.engine.runAndWait()
-            
         except Exception as e:
             self.logger.error(f"Error in pyttsx3 TTS: {e}")
             raise

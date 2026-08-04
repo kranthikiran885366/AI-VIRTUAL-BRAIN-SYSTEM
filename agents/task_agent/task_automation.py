@@ -10,8 +10,6 @@ try:
 except ImportError:
     def get_logger():
         return logging.getLogger(__name__)
-from orchestrator.config import settings
-
 
 from .config import settings
 

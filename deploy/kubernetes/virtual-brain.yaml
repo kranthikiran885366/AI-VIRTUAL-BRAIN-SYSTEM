@@ -1,0 +1,256 @@
+# ── AI Virtual Brain System — Kubernetes Production Manifests ─────────────────
+# Phase 15: Enterprise Deployment
+# Includes: Namespace, ConfigMap, Secrets, Deployment, Service, Ingress, HPA, PDB
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: virtual-brain
+  labels:
+    app.kubernetes.io/name: virtual-brain
+    app.kubernetes.io/part-of: ai-virtual-brain-system
+
+---
+# ConfigMap: Non-sensitive configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vbrain-config
+  namespace: virtual-brain
+data:
+  HOST: "0.0.0.0"
+  PORT: "8001"
+  LOG_LEVEL: "INFO"
+  DEBUG: "false"
+  WORKERS: "2"
+  DISTRIBUTED_MODE: "true"
+  CLUSTER_NODE_ID: "k8s-node"
+  CIRCUIT_BREAKER_ENABLED: "true"
+  DLQ_ENABLED: "true"
+  PROMETHEUS_ENABLED: "true"
+  SECURITY_ENABLED: "true"
+  AUDIT_LOG_ENABLED: "true"
+  KAFKA_ENABLED: "true"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.virtual-brain.svc.cluster.local:9092"
+  REDIS_ENABLED: "true"
+  REDIS_HOST: "redis.virtual-brain.svc.cluster.local"
+  REDIS_PORT: "6379"
+
+---
+# Secret: Sensitive configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vbrain-secrets
+  namespace: virtual-brain
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://vbrain:CHANGE_ME@postgres.virtual-brain.svc.cluster.local:5432/vbrain"
+  JWT_SECRET_KEY: "CHANGE_ME_TO_A_SECURE_RANDOM_KEY"
+  REDIS_PASSWORD: ""
+
+---
+# Deployment: AI Virtual Brain Orchestrator
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vbrain-orchestrator
+  namespace: virtual-brain
+  labels:
+    app: vbrain-orchestrator
+    app.kubernetes.io/name: virtual-brain
+    app.kubernetes.io/component: orchestrator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vbrain-orchestrator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: vbrain-orchestrator
+        app.kubernetes.io/name: virtual-brain
+        app.kubernetes.io/component: orchestrator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/api/v1/observability/metrics"
+    spec:
+      serviceAccountName: vbrain-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: orchestrator
+          image: vbrain-orchestrator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+              protocol: TCP
+              name: http
+          envFrom:
+            - configMapRef:
+                name: vbrain-config
+            - secretRef:
+                name: vbrain-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: vbrain-data-pvc
+        - name: logs
+          emptyDir: {}
+      terminationGracePeriodSeconds: 60
+
+---
+# Service: ClusterIP
+apiVersion: v1
+kind: Service
+metadata:
+  name: vbrain-orchestrator
+  namespace: virtual-brain
+  labels:
+    app: vbrain-orchestrator
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8001
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: vbrain-orchestrator
+
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vbrain-ingress
+  namespace: virtual-brain
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - brain.example.com
+      secretName: vbrain-tls
+  rules:
+    - host: brain.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vbrain-orchestrator
+                port:
+                  number: 8001
+
+---
+# HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vbrain-hpa
+  namespace: virtual-brain
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vbrain-orchestrator
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+---
+# PodDisruptionBudget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vbrain-pdb
+  namespace: virtual-brain
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vbrain-orchestrator
+
+---
+# ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vbrain-sa
+  namespace: virtual-brain
+
+---
+# PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vbrain-data-pvc
+  namespace: virtual-brain
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

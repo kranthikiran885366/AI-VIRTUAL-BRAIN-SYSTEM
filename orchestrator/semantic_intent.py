@@ -162,6 +162,11 @@ class SemanticIntentRouter:
         self._build_tfidf_index()
 
     def _init_embeddings(self) -> None:
+        import os
+        if os.getenv("DISABLE_EMBEDDINGS", "").lower() in ("1", "true", "yes"):
+            self._embedding_model = None
+            self._embedding_available = False
+            return
         try:
             from sentence_transformers import SentenceTransformer
 

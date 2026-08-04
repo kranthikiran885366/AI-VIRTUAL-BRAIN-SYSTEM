@@ -364,8 +364,9 @@ const brainTools = {
       limit: z.number().optional().describe("Maximum memories to return"),
     }),
     execute: async ({ query, memoryTypes, limit = 5 }) => {
+      const memories = searchMemories("default", query, limit)
       return {
-        memories: [],
+        memories,
         message: `Searched memories for: "${query}"`,
         typesSearched: memoryTypes || ["all"],
         limit,

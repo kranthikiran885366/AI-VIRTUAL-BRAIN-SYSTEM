@@ -929,11 +929,13 @@ class ReasoningAgent(BaseAgent):
     # ─── Event emission (item 9) ──────────────────────────────────────────────────────
 
     async def _emit_event(self, event: str, payload: Dict[str, Any]) -> None:
-        """Emit a broker event non-blocking best-effort."""
+        """Emit a broker event non-blocking best-effort — silent on failure."""
+        if not self._message_broker:
+            return
         try:
             await self.broadcast_message(event, payload)
         except Exception:
-            pass  # event emission is best-effort
+            pass  # event emission is best-effort; never log errors here
 
     # ─── Percentile metrics (item 10) ───────────────────────────────────────────────
 
@@ -1231,7 +1233,7 @@ class ReasoningAgent(BaseAgent):
     async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         action = task.get("action", "")
         data = task.get("input_data", {}) or {}
-        text = data.get("content", data.get("text", data.get("problem", "")))
+        text = data.get("content", data.get("text", data.get("problem", data.get("query", ""))))
         context = task.get("execution_context") or {}
 
         if action in ("reason", "analyze", "logic", "think", "evaluate", "solve"):

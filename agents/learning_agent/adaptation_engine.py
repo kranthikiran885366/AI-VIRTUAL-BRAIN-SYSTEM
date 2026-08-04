@@ -513,6 +513,106 @@ class AdaptationEngine:
             self.logger.error(f"Error calculating adaptation trend: {e}")
             return 0.0
             
+    # ─── Missing helper methods (root-cause fix) ─────────────────────────────
+
+    def _calculate_domain_specificity(self, domain: str) -> float:
+        """Return a specificity score for a domain string."""
+        try:
+            if not domain or domain == "unknown":
+                return 0.5
+            # More specific domains (longer, more words) score higher
+            return min(1.0, 0.3 + len(domain.split()) * 0.15)
+        except Exception:
+            return 0.5
+
+    def _calculate_generalizability(self, concepts: list) -> float:
+        """Estimate how broadly applicable a set of concepts is."""
+        try:
+            if not concepts:
+                return 0.5
+            # Fewer, shorter concepts → more general
+            avg_len = sum(len(str(c)) for c in concepts) / len(concepts)
+            return max(0.1, min(1.0, 1.0 - (avg_len / 50.0)))
+        except Exception:
+            return 0.5
+
+    def _calculate_concept_novelty(self, concepts: list) -> float:
+        """Estimate novelty of concepts relative to adaptation history."""
+        try:
+            if not concepts or not self.adaptation_history:
+                return 0.7  # assume novel when no history
+            seen: set = set()
+            for record in self.adaptation_history:
+                ea = record.get("experience_analysis", {})
+                seen.update(str(c) for c in ea.get("concepts", []))
+            novel = sum(1 for c in concepts if str(c) not in seen)
+            return novel / len(concepts)
+        except Exception:
+            return 0.5
+
+    def _calculate_relationship_novelty(self, relationships: list) -> float:
+        """Estimate novelty of relationships relative to adaptation history."""
+        try:
+            if not relationships or not self.adaptation_history:
+                return 0.7
+            seen: set = set()
+            for record in self.adaptation_history:
+                ea = record.get("experience_analysis", {})
+                seen.update(str(r) for r in ea.get("relationships", []))
+            novel = sum(1 for r in relationships if str(r) not in seen)
+            return novel / len(relationships)
+        except Exception:
+            return 0.5
+
+    def _calculate_strategy_relevance(
+        self, strategy: str, experience_analysis: Dict[str, Any]
+    ) -> float:
+        """Score how relevant a strategy is for the current experience."""
+        try:
+            novelty = experience_analysis.get("novelty", 0.5)
+            complexity = experience_analysis.get("complexity", 0.5)
+            if strategy == "exploration":
+                return min(1.0, novelty * 1.2)
+            if strategy == "exploitation":
+                return min(1.0, (1.0 - novelty) * 1.2)
+            if strategy == "generalization":
+                return min(1.0, (1.0 - complexity) * 1.1)
+            if strategy == "specialization":
+                return min(1.0, complexity * 1.1)
+            return 0.5
+        except Exception:
+            return 0.5
+
+    def _calculate_strategy_effectiveness(
+        self, strategy: str, experience_analysis: Dict[str, Any]
+    ) -> float:
+        """Score how effective a strategy has been historically."""
+        try:
+            if not self.adaptation_history:
+                return 0.5
+            scores = []
+            for record in self.adaptation_history:
+                for adaptation in record.get("adaptations", []):
+                    if adaptation.get("strategy") == strategy:
+                        success = record.get("experience_analysis", {}).get("success", 0.5)
+                        scores.append(success)
+            if not scores:
+                return 0.5
+            return sum(scores) / len(scores)
+        except Exception:
+            return 0.5
+
+    def _calculate_strategy_efficiency(
+        self, strategy: str, current_state: Dict[str, Any]
+    ) -> float:
+        """Score efficiency of a strategy given current state."""
+        try:
+            weight = self.strategy_weights.get(strategy, 0.25)
+            # Higher weight → more efficient (already proven useful)
+            return min(1.0, weight * 2.0)
+        except Exception:
+            return 0.5
+
     def reset(self):
         """Reset the adaptation engine."""
         try:
@@ -520,4 +620,4 @@ class AdaptationEngine:
             self.strategy_weights = self._initialize_weights()
             self.adaptation_history = []
         except Exception as e:
-            self.logger.error(f"Error resetting adaptation engine: {e}") 
+            self.logger.error(f"Error resetting adaptation engine: {e}")

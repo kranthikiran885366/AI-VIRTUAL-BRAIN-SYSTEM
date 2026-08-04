@@ -44,6 +44,16 @@ class ImageProcessor:
             tileGridSize=self.clahe_grid_size
         )
         
+        # Resize parameters
+        self.enable_resize = config.get("enable_resize", False)
+        self.target_width = config.get("target_width", 640)
+        self.target_height = config.get("target_height", 480)
+        
+        # Additional processing flags
+        self.enable_histogram_equalization = config.get("enable_histogram_equalization", False)
+        self.enable_gaussian_blur = config.get("enable_gaussian_blur", False)
+        self.normalize = config.get("normalize", False)
+        
         # Metrics
         self.metrics = {
             "total_frames_processed": 0,
@@ -65,6 +75,10 @@ class ImageProcessor:
             # Create a copy of the frame
             processed = frame.copy()
             
+            # Apply resize if enabled
+            if getattr(self, "enable_resize", False):
+                processed = self._resize(processed)
+
             # Apply denoising
             if self.enable_denoising:
                 processed = self._denoise(processed)
@@ -81,6 +95,18 @@ class ImageProcessor:
             if self.enable_color_correction:
                 processed = self._correct_color(processed)
             
+            # Apply histogram equalization if enabled
+            if getattr(self, "enable_histogram_equalization", False):
+                processed = self._apply_histogram_equalization(processed)
+            
+            # Apply Gaussian blur if enabled
+            if getattr(self, "enable_gaussian_blur", False):
+                processed = self._apply_gaussian_blur(processed)
+            
+            # Normalize if enabled
+            if getattr(self, "normalize", False):
+                processed = self._normalize(processed)
+
             # Update metrics
             self._update_metrics(start_time)
             
@@ -248,33 +274,6 @@ class ImageProcessor:
             self.logger.error(f"Failed to update image processor configuration: {str(e)}")
             raise
 
-    def process(self, frame: np.ndarray) -> np.ndarray:
-        """Process the input frame."""
-        try:
-            # Create a copy of the frame
-            processed = frame.copy()
-            
-            # Resize if enabled
-            if self.resize:
-                processed = self._resize(processed)
-            
-            # Apply histogram equalization if enabled
-            if self.enable_histogram_equalization:
-                processed = self._apply_histogram_equalization(processed)
-            
-            # Apply Gaussian blur if enabled
-            if self.enable_gaussian_blur:
-                processed = self._apply_gaussian_blur(processed)
-            
-            # Normalize if enabled
-            if self.normalize:
-                processed = self._normalize(processed)
-            
-            return processed
-            
-        except Exception as e:
-            self.logger.error(f"Error in image processing: {e}")
-            return frame
 
     def _resize(self, frame: np.ndarray) -> np.ndarray:
         """Resize the frame to target dimensions."""

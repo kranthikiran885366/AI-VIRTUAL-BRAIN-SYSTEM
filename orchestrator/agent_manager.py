@@ -147,6 +147,7 @@ class AgentManager:
                 except ImportError as e:
                     last_error = e
                     # Keep trying other candidates when dependencies are missing or relative import issues occur.
+                    logger.debug("agent_manager.candidate_import_failed module=%s error=%s", module_path, e)
                     continue
 
             if not agent_module:
@@ -487,9 +488,12 @@ class AgentManager:
                         health = {"status": self.agent_status.get(agent_name, "unknown")}
 
                     current_status = health.get("status", "unknown")
-
-                    # Do NOT restart paused, stopped, or shutdown agents
-                    if current_status in {"healthy", "running", "active", "paused", "stopped", "shutdown"}:
+                    # Also accept {'healthy': True} format from sensory agents
+                    if health.get("healthy") is True:
+                        current_status = "healthy"
+                    # 'initialized' is a valid non-error state — don't restart
+                    if current_status in {"healthy", "running", "active", "paused",
+                                          "stopped", "shutdown", "initialized", "idle"}:
                         continue
 
                     # Only restart if not intentionally stopped

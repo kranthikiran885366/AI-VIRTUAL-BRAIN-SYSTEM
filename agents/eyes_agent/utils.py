@@ -202,6 +202,33 @@ def draw_tracking_path(
     
     return frame
 
+def load_config(config_path: str) -> Dict[str, Any]:
+    """Load YAML configuration file, returning defaults if file is missing."""
+    import yaml
+    defaults: Dict[str, Any] = {
+        "camera": {"device_id": 0, "width": 640, "height": 480, "fps": 30},
+        "object_detection": {"enabled": False, "confidence_threshold": 0.5},
+        "face_tracking": {"enabled": False, "confidence_threshold": 0.5},
+        "image_processing": {"enabled": True},
+        "logging": {"level": "INFO", "output_dir": "logs"},
+        "metrics": {"file": "logs/eyes_agent_metrics.json"},
+    }
+    try:
+        path = Path(config_path)
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = yaml.safe_load(f) or {}
+            # Deep-merge loaded values over defaults
+            for key, value in loaded.items():
+                if isinstance(value, dict) and isinstance(defaults.get(key), dict):
+                    defaults[key].update(value)
+                else:
+                    defaults[key] = value
+    except Exception as exc:
+        logging.warning(f"eyes_agent.load_config failed path={config_path} error={exc}")
+    return defaults
+
+
 def create_timestamp() -> str:
     """Create a timestamp string."""
     return datetime.now().strftime("%Y%m%d_%H%M%S")

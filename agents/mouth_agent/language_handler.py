@@ -3,12 +3,17 @@ from typing import Dict, Any, Optional
 import json
 from pathlib import Path
 import aiohttp
-from googletrans import Translator
+try:
+    from googletrans import Translator
+    _GOOGLETRANS_AVAILABLE = True
+except ImportError:
+    _GOOGLETRANS_AVAILABLE = False
+    Translator = None
 
 class LanguageHandler:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.translator = Translator()
+        self.translator = Translator() if _GOOGLETRANS_AVAILABLE else None
         self.supported_languages = {
             "en-US": "English (US)",
             "hi-IN": "Hindi",
@@ -28,7 +33,7 @@ class LanguageHandler:
             profiles_dir = Path("agents/mouth_agent/voice_profiles")
             
             for profile_file in profiles_dir.glob("*.json"):
-                with open(profile_file, 'r') as f:
+                with open(profile_file, 'r', encoding='utf-8') as f:
                     profile = json.load(f)
                     language = profile.get("language")
                     if language:
@@ -41,17 +46,14 @@ class LanguageHandler:
 
     async def translate_text(self, text: str, target_language: str) -> str:
         """Translate text to target language"""
+        if not _GOOGLETRANS_AVAILABLE or not self.translator:
+            return text
         try:
-            # Detect source language
             detection = self.translator.detect(text)
             source_language = detection.lang
-            
-            # Translate if needed
             if source_language != target_language:
                 translation = self.translator.translate(
-                    text,
-                    src=source_language,
-                    dest=target_language
+                    text, src=source_language, dest=target_language
                 )
                 return translation.text
             return text
@@ -84,6 +86,8 @@ class LanguageHandler:
 
     async def detect_language(self, text: str) -> str:
         """Detect language of text"""
+        if not _GOOGLETRANS_AVAILABLE or not self.translator:
+            return "en"
         try:
             detection = self.translator.detect(text)
             return detection.lang

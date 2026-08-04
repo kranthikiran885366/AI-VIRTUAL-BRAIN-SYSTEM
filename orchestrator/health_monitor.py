@@ -188,12 +188,14 @@ class HealthMonitor:
     
     async def _create_alert(self, metric_name: str, value: float):
         """Create a health alert."""
+        threshold_key = metric_name.lower().replace(" ", "_")
+        threshold = self.thresholds.get(threshold_key, 0)
         alert = {
             "metric": metric_name,
             "value": value,
-            "threshold": self.thresholds[metric_name.lower().replace(" ", "_")],
+            "threshold": threshold,
             "timestamp": datetime.utcnow().isoformat(),
-            "severity": "critical" if value > self.thresholds[metric_name.lower().replace(" ", "_")] * 1.2 else "warning"
+            "severity": "critical" if threshold and value > threshold * 1.2 else "warning"
         }
         
         self.alerts.append(alert)
