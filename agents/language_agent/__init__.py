@@ -12,10 +12,21 @@ from .engine import LanguageEngine
 # so that AgentManager can call await agent.initialize() successfully.
 # The LanguageEngine itself only has start()/stop() — not the BaseAgent contract.
 try:
-    # When imported as agents.language_agent package, parent package exposes LanguageAgent
-    from agents.language_agent import LanguageAgent as _LanguageAgent  # type: ignore
-    LanguageAgent = _LanguageAgent
-except ImportError:
+    import importlib.util
+    from pathlib import Path
+
+    file_path = Path(__file__).resolve().parents[1] / "language_agent.py"
+    if not file_path.exists():
+        raise ImportError("language_agent.py module file not found")
+
+    spec = importlib.util.spec_from_file_location("agents.language_agent_impl", file_path)
+    if not spec or not spec.loader:
+        raise ImportError("Unable to create spec for language_agent.py")
+
+    _module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(_module)
+    LanguageAgent = getattr(_module, "LanguageAgent")
+except Exception:
     # Fallback: define a thin wrapper so the package always exports LanguageAgent
     import asyncio as _asyncio
     import logging as _logging

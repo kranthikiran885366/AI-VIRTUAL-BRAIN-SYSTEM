@@ -91,6 +91,7 @@ class EyesAgent:
                 # Get frame from camera
                 frame = await self.camera.get_frame()
                 if frame is None:
+                    await asyncio.sleep(0.1)
                     continue
                 
                 # Process frame
@@ -114,6 +115,9 @@ class EyesAgent:
                 
                 # Update processing stats
                 self._update_processing_stats(processing_time)
+                
+                # Sleep to maintain ~30 FPS and yield to asyncio event loop
+                await asyncio.sleep(0.033)
                 
             except Exception as e:
                 self.logger.error(f"Error in processing loop: {str(e)}")

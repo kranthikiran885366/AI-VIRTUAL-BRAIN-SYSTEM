@@ -98,6 +98,7 @@ class CaptureManager:
                 ret, frame = self.camera.read()
                 if not ret:
                     self.logger.warning("Failed to read frame from camera")
+                    time.sleep(0.1)
                     continue
                 
                 # Add frame to buffer
@@ -118,6 +119,7 @@ class CaptureManager:
             
             except Exception as e:
                 self.logger.error(f"Error in capture loop: {str(e)}")
+                time.sleep(0.1)
     
     def _processing_loop(self):
         """Process frames from buffer."""
@@ -133,6 +135,8 @@ class CaptureManager:
                     # Update last frame
                     self.last_frame = processed_frame
                     self.last_frame_time = time.time()
+                else:
+                    time.sleep(0.01)
                 
                 # Small delay to prevent CPU overload
                 time.sleep(0.001)

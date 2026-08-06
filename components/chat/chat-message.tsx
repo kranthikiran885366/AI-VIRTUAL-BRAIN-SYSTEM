@@ -28,6 +28,7 @@ import {
 import { useState } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { UIMessage } from "ai"
 
@@ -115,10 +116,13 @@ export const ChatMessage = memo(function ChatMessage({
   const [toolsExpanded, setToolsExpanded] = useState<Record<number, boolean>>({})
 
   // Extract text content from parts
-  const textContent = message.parts
-    ?.filter((p) => p.type === "text")
-    .map((p) => p.text)
-    .join("") || message.content || ""
+  const textContent = [
+    message.parts
+      ?.filter((p: any) => p.type === "text")
+      .map((p: any) => p.text)
+      .join(""),
+    typeof (message as any).content === "string" ? (message as any).content : "",
+  ].filter(Boolean).join("") || ""
 
   // Check for tool invocations
   const toolParts = message.parts?.filter((p) => p.type === "tool-invocation") || []

@@ -622,7 +622,11 @@ async def shutdown():
 async def health_check():
     lifecycle = get_lifecycle_manager()
     statuses = await lifecycle.get_all_agent_statuses()
-    healthy = sum(1 for s in statuses.values() if s.get("is_running"))
+    healthy = sum(
+        1
+        for s in statuses.values()
+        if s.get("health", {}).get("is_healthy") is True or s.get("status") == "healthy"
+    )
     uptime = (datetime.utcnow() - _startup_time).total_seconds()
     db_health = _database_manager.health_check() if _database_manager else {"ok": True, "status": "unknown"}
     controller_status = await _communication_controller.get_status() if _communication_controller else {"status": "stopped"}

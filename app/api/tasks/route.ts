@@ -9,11 +9,9 @@ import {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get("userId")
+    const userId = searchParams.get("userId") || "default-user"
     const status = searchParams.get("status")
     const limit = parseInt(searchParams.get("limit") || "50")
-
-    if (!userId) return NextResponse.json({ error: "Missing userId parameter" }, { status: 400 })
 
     const tasks = getUserTasks(userId, status || undefined, limit)
     return NextResponse.json(tasks)
@@ -28,13 +26,13 @@ export async function POST(req: Request) {
     const body = await req.json()
     const { userId, title, description, priority = "medium", due_date, tags = [], source_conversation_id } = body
 
-    if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
+    const resolvedUserId = userId || "default-user"
     if (!title) return NextResponse.json({ error: "Missing task title" }, { status: 400 })
 
-    const user = getOrCreateUser(userId, `user-${userId}@brain.local`, "AI User")
+    const user = getOrCreateUser(resolvedUserId, `user-${resolvedUserId}@brain.local`, "AI User")
     if (!user) return NextResponse.json({ error: "Failed to create user" }, { status: 500 })
 
-    const task = createTask(userId, title, description, priority, due_date, tags, source_conversation_id)
+    const task = createTask(resolvedUserId, title, description, priority, due_date, tags, source_conversation_id)
     if (!task) return NextResponse.json({ error: "Failed to create task" }, { status: 500 })
 
     return NextResponse.json(task)

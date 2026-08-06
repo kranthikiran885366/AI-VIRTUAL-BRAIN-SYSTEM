@@ -152,6 +152,7 @@ class EyesAgent:
                 # Get frame from capture manager
                 frame = self.capture_manager.get_frame()
                 if frame is None:
+                    time.sleep(0.05)
                     continue
                 
                 # Process frame

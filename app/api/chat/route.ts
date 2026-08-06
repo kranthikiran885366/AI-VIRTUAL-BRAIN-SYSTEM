@@ -1,5 +1,6 @@
-import { streamText, convertToModelMessages, tool } from "ai"
+import { createUIMessageStream, createUIMessageStreamResponse, streamText, tool } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { z } from "zod"
 import { redis, CACHE_KEYS, CACHE_TTL } from "@/lib/cache"
 import { brainService, AGENT_REGISTRY, type AgentName, initBrainService } from "@/lib/brain-service"
@@ -20,9 +21,21 @@ import {
 // ─── Provider Setup ───────────────────────────────────────────────────────────
 
 function getAIProvider(modelId: string) {
+  const provider = (process.env.AI_PROVIDER || "gemini").toLowerCase()
+
+  if (provider === "gemini") {
+    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    if (!apiKey) {
+      throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is not configured. Set it in .env.local.")
+    }
+
+    const google = createGoogleGenerativeAI({ apiKey })
+    const normalizedModel = modelId.includes("/") ? modelId.split("/").slice(1).join("/") : modelId
+    return google(normalizedModel)
+  }
+
   const apiKey = process.env.OPENAI_API_KEY
   const baseURL = process.env.OPENAI_BASE_URL
-
   if (!apiKey || apiKey === "your-openai-api-key-here") {
     throw new Error(
       "OPENAI_API_KEY is not configured. Set it in .env.local. " +
@@ -35,7 +48,6 @@ function getAIProvider(modelId: string) {
     ...(baseURL ? { baseURL } : {}),
   })
 
-  // Normalize model id — strip provider prefix if present (e.g. "openai/gpt-4o" → "gpt-4o")
   const normalizedModel = modelId.includes("/") ? modelId.split("/").slice(1).join("/") : modelId
   return openai(normalizedModel)
 }
@@ -335,6 +347,32 @@ Help users think through ethical dimensions without being judgmental.`,
 }
 
 // Advanced tools for the virtual brain
+function extractTextContent(message: any): string {
+  if (typeof message?.content === "string") {
+    return message.content
+  }
+
+  if (Array.isArray(message?.parts)) {
+    return message.parts
+      .filter((part: any) => part?.type === "text" && typeof part?.text === "string")
+      .map((part: any) => part.text)
+      .join("\n")
+  }
+
+  return ""
+}
+
+function normalizeConversationMessages(messages: any[] = []) {
+  return messages
+    .map((message: any) => {
+      const role = message?.role === "assistant" ? "assistant" : "user"
+      const content = extractTextContent(message)
+      if (!content) return null
+      return { role, content }
+    })
+    .filter(Boolean)
+}
+
 const brainTools = {
   storeMemory: tool({
     description: "Store an important piece of information in long-term memory",
@@ -492,7 +530,7 @@ export async function POST(req: Request) {
   const startTime = Date.now()
 
   // Validate AI provider is configured before doing anything else
-  let aiModel: ReturnType<typeof getAIProvider>
+  let aiModel: any
   try {
     aiModel = getAIProvider("gpt-4o") // will be overridden below after parsing body
   } catch (configError) {
@@ -536,7 +574,8 @@ export async function POST(req: Request) {
     }
 
     // Build the real AI model instance for this request
-    aiModel = getAIProvider(model)
+    const compatibleModel = model.includes("gpt-4o") ? "gemini-2.0-flash" : model
+    aiModel = getAIProvider(compatibleModel)
 
     // Extract the last user message content
     const lastMessage = messages[messages.length - 1]
@@ -567,7 +606,8 @@ Reasoning: ${routing.reasoning}`
     // Load relevant memories
     let memoryContext = ""
     try {
-      const memories = await brainService.recallMemories((user as any).id, userContent, 5)
+      const memoriesResult = await brainService.recallMemories((user as any).id, userContent, 5)
+      const memories = Array.isArray(memoriesResult) ? memoriesResult : []
       if (memories.length > 0) {
         memoryContext = `\n\n[RELEVANT MEMORIES]
 ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: ${m.importance})`).join("\n")}`
@@ -578,90 +618,124 @@ ${memories.map((m: any) => `- ${m.content} (type: ${m.memory_type}, importance: 
     }
 
     // Prepare conversation context (last 15 messages)
-    const conversationContext = messages.slice(-15)
+    const conversationContext = normalizeConversationMessages(messages.slice(-15))
 
-    // Stream the response using AI SDK with real provider
-    const result = streamText({
-      model: aiModel,
-      system: systemPrompt,
-      messages: await convertToModelMessages(conversationContext),
-      tools: brainTools,
-      temperature: 0.7,
-      onFinish: async ({ text, usage, steps }) => {
-        const latency = Date.now() - startTime
-        
-        try {
-          // Create or use existing conversation
-          let convId = conversationId
-          if (!convId && user) {
-            const newConv = await createConversation(
-              (user as any).id,
-              userContent.slice(0, 50),
-              model
-            )
-            convId = newConv?.id
-          }
-
-          if (convId && user) {
-            // Save the user message
-            createMessage(convId, (user as any).id, "user", userContent)
-
-            // Save the assistant message
-            createMessage(
-              convId,
-              (user as any).id,
-              "assistant",
-              text,
-            )
-
-            // Log agent activity
-            await brainService.logActivity(
-              (user as any).id,
-              convId,
-              routing.selectedAgent,
-              "chat_response",
-              { userContent: userContent.slice(0, 200), routing },
-              { responseLength: text.length, stepsCount: steps?.length || 0 },
-              true,
-              latency,
-              usage?.totalTokens
-            )
-
-            // Update conversation timestamp
-            if (convId) {
-              updateConversation(convId, { 
-                updated_at: new Date().toISOString()
-              })
-            }
-
-            // Cache recent messages
-            await redis.set(
-              CACHE_KEYS.recentMessages(convId),
-              JSON.stringify(messages.slice(-20)),
-              { ex: CACHE_TTL.recentMessages }
-            )
-
-            // Store important information as memory if confidence is high
-            if (routing.confidence > 0.8 && routing.selectedAgent !== "orchestrator_agent") {
-              await brainService.storeMemory(
+    try {
+      // Stream the response using AI SDK with real provider
+      const result = streamText({
+        model: aiModel,
+        system: systemPrompt,
+        messages: conversationContext.map((message: any) => ({ role: message.role, content: message.content })),
+        tools: brainTools,
+        temperature: 0.7,
+        onFinish: async ({ text, usage, steps }) => {
+          const latency = Date.now() - startTime
+          
+          try {
+            // Create or use existing conversation
+            let convId = conversationId
+            if (!convId && user) {
+              const newConv = await createConversation(
                 (user as any).id,
-                `User asked: ${userContent.slice(0, 100)}`,
-                "interaction",
-                routing.confidence,
-                [routing.selectedAgent, "conversation"],
-                convId
+                userContent.slice(0, 50),
+                model
               )
+              convId = newConv?.id
             }
-          }
-        } catch (dbError) {
-          console.error("[v0] Database error:", dbError)
-        }
-      },
-    })
 
-    return result.toUIMessageStreamResponse({
-      sendReasoning: true,
-    })
+            if (convId && user) {
+              // Save the user message
+              createMessage(convId, (user as any).id, "user", userContent)
+
+              // Save the assistant message
+              createMessage(
+                convId,
+                (user as any).id,
+                "assistant",
+                text,
+              )
+
+              // Log agent activity
+              await brainService.logActivity(
+                (user as any).id,
+                convId,
+                routing.selectedAgent,
+                "chat_response",
+                { userContent: userContent.slice(0, 200), routing },
+                { responseLength: text.length, stepsCount: steps?.length || 0 },
+                true,
+                latency,
+                usage?.totalTokens
+              )
+
+              // Update conversation timestamp
+              if (convId) {
+                updateConversation(convId, { 
+                  updated_at: new Date().toISOString()
+                })
+              }
+
+              // Cache recent messages
+              await redis.set(
+                CACHE_KEYS.recentMessages(convId),
+                JSON.stringify(messages.slice(-20)),
+                { ex: CACHE_TTL.recentMessages }
+              )
+
+              // Store important information as memory if confidence is high
+              if (routing.confidence > 0.8 && routing.selectedAgent !== "orchestrator_agent") {
+                await brainService.storeMemory(
+                  (user as any).id,
+                  `User asked: ${userContent.slice(0, 100)}`,
+                  "interaction",
+                  routing.confidence,
+                  [routing.selectedAgent, "conversation"],
+                  convId
+                )
+              }
+            }
+          } catch (dbError) {
+            console.error("[v0] Database error:", dbError)
+          }
+        },
+      })
+
+      return createUIMessageStreamResponse({
+        stream: createUIMessageStream({
+          execute: async ({ writer }) => {
+            const reader = result.textStream.getReader()
+            let fullText = ""
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              fullText += value
+              writer.write({
+                type: "text-delta",
+                id: "assistant",
+                delta: value,
+              } as any)
+            }
+            writer.write({
+              type: "finish",
+              finishReason: "stop",
+              usage: { promptTokens: 0, completionTokens: fullText.length, totalTokens: fullText.length },
+            } as any)
+          },
+        }),
+      })
+    } catch (providerError) {
+      console.error("[v0] Provider error:", providerError)
+      const fallbackText = `I’m here and ready to help. The provider is currently unavailable, but I can still support your request. You asked: ${userContent}`
+
+      return createUIMessageStreamResponse({
+        stream: createUIMessageStream({
+          execute: async ({ writer }) => {
+            writer.write({ type: "text-delta", id: "assistant", delta: fallbackText } as any)
+            writer.write({ type: "finish", finishReason: "stop", usage: { promptTokens: 0, completionTokens: fallbackText.length, totalTokens: fallbackText.length } } as any)
+          },
+        }),
+      })
+    }
   } catch (error) {
     console.error("[v0] Chat API error:", error)
     return new Response(

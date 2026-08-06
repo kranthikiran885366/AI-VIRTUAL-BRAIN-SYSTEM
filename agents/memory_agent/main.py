@@ -28,4 +28,6 @@ except ImportError:
     MemoryData = dict  # type: ignore
     MemoryQuery = dict  # type: ignore
 
+from .agent import MemoryAgent
+
 __all__ = ["MemoryAgent", "MemoryData", "MemoryQuery"]

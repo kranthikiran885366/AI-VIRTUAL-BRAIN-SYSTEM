@@ -85,8 +85,10 @@ class AgentManager:
         
         # Load and initialize all agents
         for agent_name, agent_config in self.config.get("agents", {}).items():
+            logger.info("Loading agent %s", agent_name)
             try:
                 await self.load_agent(agent_name, agent_config)
+                logger.info("Loaded agent %s successfully", agent_name)
             except Exception as e:
                 logger.error(f"Failed to load agent {agent_name}: {e}")
         
@@ -138,19 +140,42 @@ class AgentManager:
             agent_module = None
             last_error = None
 
+            def _find_agent_class(module):
+                class_name = self._normalize_agent_class_name(agent_name)
+                candidate = getattr(module, class_name, None)
+                if isinstance(candidate, type):
+                    return candidate
+                for attr in dir(module):
+                    try:
+                        value = getattr(module, attr)
+                    except Exception:
+                        continue
+                    if attr.lower().endswith("agent") and isinstance(value, type):
+                        return value
+                return None
+
+            agent_class = None
             for module_path in module_candidates:
+                logger.debug("agent_manager.attempt_import module=%s agent=%s", module_path, agent_name)
                 try:
                     agent_module = importlib.import_module(module_path)
-                    break
                 except ModuleNotFoundError as e:
                     last_error = e
+                    logger.debug("agent_manager.module_not_found module=%s agent=%s", module_path, agent_name)
+                    continue
                 except ImportError as e:
                     last_error = e
-                    # Keep trying other candidates when dependencies are missing or relative import issues occur.
                     logger.debug("agent_manager.candidate_import_failed module=%s error=%s", module_path, e)
                     continue
 
-            if not agent_module:
+                agent_class = _find_agent_class(agent_module)
+                if agent_class:
+                    logger.debug("agent_manager.found_agent_class module=%s class=%s", module_path, agent_class.__name__)
+                    break
+                logger.debug("agent_manager.candidate_no_agent_class module=%s", module_path)
+                agent_module = None
+
+            if not agent_class:
                 agents_root = Path(__file__).resolve().parents[1] / "agents"
                 fallback_paths = [
                     agents_root / f"{agent_name}.py",
@@ -158,30 +183,27 @@ class AgentManager:
                     agents_root / agent_name / "__init__.py",
                 ]
                 for path in fallback_paths:
+                    logger.debug("agent_manager.fallback_path_check agent=%s path=%s", agent_name, path)
                     if path.exists():
                         try:
+                            logger.debug("agent_manager.fallback_import agent=%s path=%s", agent_name, path)
                             spec_name = f"agents._loaded_{agent_name}_{path.stem}"
                             spec = importlib.util.spec_from_file_location(spec_name, path)
                             if spec and spec.loader:
                                 module = importlib.util.module_from_spec(spec)
                                 sys.modules[spec_name] = module
                                 spec.loader.exec_module(module)
-                                agent_module = module
-                                self._loaded_modules[agent_name] = module
-                                break
+                                agent_class = _find_agent_class(module)
+                                if agent_class:
+                                    agent_module = module
+                                    self._loaded_modules[agent_name] = module
+                                    break
                         except Exception as e:
                             last_error = e
+                            logger.debug("agent_manager.fallback_import_failed agent=%s path=%s error=%s", agent_name, path, e)
 
-            if not agent_module:
-                raise last_error or ModuleNotFoundError(f"Agent module for {agent_name} not found")
-
-            class_name = self._normalize_agent_class_name(agent_name)
-            agent_class = getattr(agent_module, class_name, None)
             if not agent_class:
-                agent_class = next(
-                    (getattr(agent_module, attr) for attr in dir(agent_module) if attr.lower().endswith("agent") and isinstance(getattr(agent_module, attr), type)),
-                    None,
-                )
+                raise last_error or ModuleNotFoundError(f"Agent module for {agent_name} not found")
 
             if not agent_class:
                 raise AttributeError(f"Agent class not found for {agent_name}")
@@ -231,13 +253,16 @@ class AgentManager:
 
             if hasattr(agent, "set_dependencies"):
                 try:
+                    logger.debug("agent_manager.set_dependencies agent=%s", agent_name)
                     await agent.set_dependencies(self.dependency_container)
                 except TypeError:
                     agent.set_dependencies(self.dependency_container)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("agent_manager.set_dependencies_failed agent=%s error=%s", agent_name, e)
 
+            logger.info("Initializing agent %s", agent_name)
             await agent.initialize()
+            logger.info("Initialized agent %s", agent_name)
 
             async with self._registry_lock:
                 self.agents[agent_name] = agent

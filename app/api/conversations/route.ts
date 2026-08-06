@@ -9,9 +9,7 @@ import { redis, CACHE_KEYS, CACHE_TTL, cacheGet, cacheSet } from "@/lib/cache"
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get("userId")
-
-    if (!userId) return NextResponse.json({ error: "Missing userId parameter" }, { status: 400 })
+    const userId = searchParams.get("userId") || "default-user"
 
     const cacheKey = CACHE_KEYS.userConversations(userId)
     const cached = await cacheGet<any[]>(cacheKey)
@@ -32,15 +30,15 @@ export async function POST(req: Request) {
     const body = await req.json()
     const { userId, title = "New Conversation", model = "gpt-4o", system_prompt } = body
 
-    if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
+    const resolvedUserId = userId || "default-user"
 
-    const user = getOrCreateUser(userId, `user-${userId}@brain.local`, "AI User")
+    const user = getOrCreateUser(resolvedUserId, `user-${resolvedUserId}@brain.local`, "AI User")
     if (!user) return NextResponse.json({ error: "Failed to create user" }, { status: 500 })
 
-    const conversation = createConversation(userId, title, model, system_prompt)
+    const conversation = createConversation(resolvedUserId, title, model, system_prompt)
     if (!conversation) return NextResponse.json({ error: "Failed to create conversation" }, { status: 500 })
 
-    await redis.del(CACHE_KEYS.userConversations(userId))
+    await redis.del(CACHE_KEYS.userConversations(resolvedUserId))
 
     return NextResponse.json(conversation)
   } catch (error) {

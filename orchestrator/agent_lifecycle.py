@@ -59,8 +59,10 @@ class AgentLifecycleManager:
         self._health_check_task: Optional[asyncio.Task] = None
         self._recovery_task: Optional[asyncio.Task] = None
         self._registry_lock = asyncio.Lock()
-        self.health_check_interval = 30  # seconds
-        self.heartbeat_timeout = 60  # seconds
+        # Increase heartbeat timeout for idle but healthy agents.
+        # Agents may not send heartbeats continuously when idle, so we allow a longer window.
+        self.health_check_interval = 60  # seconds
+        self.heartbeat_timeout = 300  # seconds
         self.max_errors = 10
         self.max_restart_attempts = 3
     
